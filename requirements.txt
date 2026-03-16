@@ -1,0 +1,10 @@
+flask
+flask-cors
+langchain
+chromadb
+sentence-transformers
+pymysql
+pdfplumber
+python-docx
+requests
+striprtf

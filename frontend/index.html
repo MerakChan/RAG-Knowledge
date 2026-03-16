@@ -1,0 +1,1685 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企业知识库RAG系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'SF Pro Display', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #ffffff;
+            height: 100vh;
+            overflow: hidden;
+            color: #1d1d1f;
+        }
+
+        .app-container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* 左侧导航栏 */
+        .sidebar {
+            width: 280px;
+            background: #ffffff;
+            border-right: 1px solid #e5e5ea;
+            display: flex;
+            flex-direction: column;
+            padding: 24px;
+            transition: width 0.3s ease, padding 0.3s ease;
+            position: relative;
+        }
+        
+        .sidebar.collapsed {
+            width: 80px;
+            padding: 24px 10px;
+        }
+
+        .sidebar.collapsed .logo h1,
+        .sidebar.collapsed .logo p,
+        .sidebar.collapsed .menu-item span {
+            display: none;
+        }
+        
+        .sidebar.collapsed .menu-item {
+            justify-content: center;
+            padding: 16px 0;
+        }
+        
+        .sidebar.collapsed .menu-item i {
+            margin-right: 0;
+            font-size: 24px;
+        }
+        
+        .toggle-btn {
+            position: absolute;
+            top: 24px;
+            right: -12px;
+            width: 24px;
+            height: 24px;
+            background: #ffffff;
+            border: 1px solid #e5e5ea;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 100;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .toggle-btn:hover {
+            background: #f5f5f7;
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        .logo h1 {
+            font-size: 24px;
+            color: #1d1d1f;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .logo p {
+            font-size: 14px;
+            color: #86868b;
+            font-weight: 400;
+        }
+
+        .upload-section {
+            margin-bottom: 30px;
+        }
+
+        .upload-btn {
+            width: 100%;
+            padding: 16px;
+            background: #1d1d1f;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .upload-btn:hover {
+            background: #3a3a3c;
+        }
+
+        .upload-btn:active {
+            background: #000000;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .upload-status {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f0f9ff;
+            border-radius: 8px;
+            color: #0369a1;
+            font-size: 14px;
+        }
+
+        .clear-btn {
+            width: 100%;
+            padding: 16px;
+            background: #f5f5f7;
+            color: #1d1d1f;
+            border: 2px solid #e5e5ea;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .clear-btn:hover {
+            background: #e5e5ea;
+        }
+
+        .thinking {
+            font-style: normal;
+            color: #4b5563;
+            background-color: #f3f4f6;
+            padding: 12px 16px;
+            border-radius: 12px;
+            margin-bottom: 12px;
+            border-left: 4px solid #9ca3af;
+            font-size: 14px;
+            display: block;
+            line-height: 1.6;
+        }
+
+        .thinking-header {
+            font-weight: 600;
+            font-size: 12px;
+            margin-bottom: 8px;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            display: flex;
+            align-items: center;
+        }
+        
+        .thinking-header i {
+            margin-right: 6px;
+            font-style: normal;
+        }
+
+        /* 表格样式 */
+        .table-responsive {
+            overflow-x: auto;
+            margin: 10px 0;
+            border-radius: 8px;
+            border: 1px solid #e5e5ea;
+        }
+
+        .chat-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        .chat-table th, .chat-table td {
+            padding: 8px 12px;
+            border: 1px solid #e5e5ea;
+            text-align: left;
+        }
+
+        .chat-table th {
+            background-color: #f9fafb;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .chat-table tr:nth-child(even) {
+            background-color: #f9fafb;
+        }
+
+        .chat-table tr:hover {
+            background-color: #f3f4f6;
+        }
+
+        .clear-btn:active {
+            background: #d1d1d6;
+        }
+
+        .menu-section {
+            margin-top: 20px;
+        }
+
+        .menu-item {
+            display: flex;
+            align-items: center;
+            padding: 16px;
+            margin-bottom: 8px;
+            background: #f5f5f7;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .menu-item:hover {
+            background: #e8e8ed;
+        }
+
+        .menu-item.active {
+            background: #1d1d1f;
+            color: white;
+        }
+
+        .menu-item i {
+            margin-right: 12px;
+            font-size: 18px;
+        }
+        
+        /* Dashboard 样式 */
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 12px;
+        }
+        
+        .stat-card {
+            background: #ffffff;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #e5e5ea;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            transition: all 0.2s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        
+        .stat-card h3 {
+            font-size: 14px;
+            color: #6b7280;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        
+        .stat-card p {
+            font-size: 28px;
+            font-weight: 700;
+            color: #111827;
+        }
+        
+        .stat-card.primary { border-left: 4px solid #3b82f6; }
+        .stat-card.success { border-left: 4px solid #10b981; }
+        .stat-card.warning { border-left: 4px solid #f59e0b; }
+        .stat-card.danger  { border-left: 4px solid #ef4444; }
+
+        /* 右侧内容区域 */
+        .main-content {
+            background: #f9fafb;
+        }
+
+        .view-container {
+            height: 100%;
+            overflow-y: auto;
+        }
+        
+        .view-container h2 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 24px;
+        }
+
+        /* 原有的聊天容器样式调整 */
+        .chat-container {
+            background: #ffffff;
+            border-radius: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 知识库管理界面样式 */
+        .kb-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .kb-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .kb-card {
+            background: #ffffff;
+            border: 1px solid #e5e5ea;
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+
+        .kb-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            border-color: #d1d5db;
+        }
+
+        .kb-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #111827;
+        }
+
+        .kb-desc {
+            font-size: 14px;
+            color: #6b7280;
+            margin-bottom: 16px;
+            line-height: 1.5;
+            height: 42px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        .kb-meta {
+            font-size: 12px;
+            color: #9ca3af;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .kb-actions {
+            margin-top: 16px;
+            display: flex;
+            gap: 10px;
+            border-top: 1px solid #f3f4f6;
+            padding-top: 16px;
+        }
+
+        .action-btn {
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #1d1d1f;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #3a3a3c;
+        }
+
+        .btn-secondary {
+            background: #f3f4f6;
+            color: #4b5563;
+        }
+
+        .btn-secondary:hover {
+            background: #e5e7eb;
+        }
+
+        .btn-danger {
+            background: #fee2e2;
+            color: #ef4444;
+        }
+
+        .btn-danger:hover {
+            background: #fecaca;
+        }
+
+        /* 模态框样式 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 12px;
+            width: 500px;
+            padding: 24px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-title {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #6b7280;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #374151;
+        }
+
+        .form-input, .form-select, .form-textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .form-input:focus, .form-select:focus, .form-textarea:focus {
+            border-color: #1d1d1f;
+        }
+
+        .form-textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .modal-footer {
+            margin-top: 24px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message {
+            display: flex;
+            margin-bottom: 20px;
+            max-width: 80%;
+        }
+
+        .message.user {
+            align-self: flex-end;
+        }
+
+        .message.ai {
+            align-self: flex-start;
+        }
+
+        .message-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            margin: 0 10px;
+        }
+
+        .message.user .message-avatar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .message.ai .message-avatar {
+            background: #e2e8f0;
+            color: #667eea;
+        }
+
+        .message-content {
+            padding: 12px 16px;
+            border-radius: 18px;
+            line-height: 1.6;
+            font-size: 15px;
+        }
+
+        .message.user .message-content {
+            background: #1d1d1f;
+            color: white;
+            border-bottom-right-radius: 8px;
+        }
+
+        .message.ai .message-content {
+            background: #f5f5f7;
+            color: #1d1d1f;
+            border-bottom-left-radius: 8px;
+        }
+
+        .chat-input-container {
+            padding: 20px;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: 10px;
+        }
+
+        #userInput {
+            flex: 1;
+            padding: 18px 24px;
+            border: 2px solid #e5e5ea;
+            border-radius: 28px;
+            font-size: 17px;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        #userInput:focus {
+            border-color: #1d1d1f;
+        }
+
+        #sendBtn {
+            padding: 18px 28px;
+            background: #1d1d1f;
+            color: white;
+            border: none;
+            border-radius: 28px;
+            cursor: pointer;
+            font-size: 17px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        #sendBtn:hover {
+            background: #3a3a3c;
+        }
+
+        #sendBtn:active {
+            background: #000000;
+        }
+
+        #stopBtn {
+            padding: 18px 28px;
+            background: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 28px;
+            cursor: pointer;
+            font-size: 17px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: none;
+        }
+
+        #stopBtn:hover {
+            background: #dc2626;
+        }
+
+        #stopBtn:active {
+            background: #b91c1c;
+        }
+
+        /* 滚动条样式 */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- 左侧导航栏 -->
+        <div class="sidebar" id="mainSidebar">
+            <div class="toggle-btn" onclick="toggleSidebar()">
+                <i style="font-style: normal; font-size: 12px;">◀</i>
+            </div>
+            <div class="logo">
+                <h1>🧠 企业知识库</h1>
+                <p>RAG智能问答系统</p>
+            </div>
+
+            <div class="menu-section">
+                <div class="menu-item" onclick="switchTab('dashboard')">
+                    <i>📊</i>
+                    <span>系统看板</span>
+                </div>
+                <div class="menu-item active" onclick="switchTab('knowledge')">
+                    <i>📚</i>
+                    <span>知识库管理</span>
+                </div>
+                <div class="menu-item" onclick="switchTab('datasource')">
+                    <i>💾</i>
+                    <span>数据源管理</span>
+                </div>
+                <div class="menu-item" onclick="switchTab('chat')">
+                    <i>�</i>
+                    <span>AI对话助手</span>
+                </div>
+                <div class="menu-item" onclick="switchTab('models')">
+                    <i>🧠</i>
+                    <span>模型管理</span>
+                </div>
+                <div class="menu-item" onclick="switchTab('system')">
+                    <i>⚙️</i>
+                    <span>系统管理</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧内容区域 -->
+        <div class="main-content" style="flex: 1; overflow: hidden; display: flex;">
+            
+            <!-- 1. 系统看板 -->
+            <div id="dashboard-view" class="view-container" style="display: none; padding: 24px; width: 100%;">
+                <h2>系统看板</h2>
+                
+                <!-- 模块一：系统总体统计 -->
+                <div class="dashboard-section">
+                    <h3 class="section-title">系统总体统计</h3>
+                    <div class="dashboard-stats" id="overall-stats" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-top: 10px;">
+                        <!-- 动态插入 -->
+                    </div>
+                </div>
+
+                <!-- 模块二：今日系统统计 -->
+                <div class="dashboard-section" style="margin-top: 30px;">
+                    <h3 class="section-title">今日系统统计</h3>
+                    <div class="dashboard-stats" id="today-stats" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-top: 10px;">
+                        <!-- 动态插入 -->
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 20px; margin-top: 30px;">
+                    <!-- 模块三：知识库数据统计 -->
+                    <div class="dashboard-section" style="flex: 1;">
+                        <h3 class="section-title">知识库数据统计</h3>
+                        <div class="dashboard-stats" id="kb-data-stats" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 10px;">
+                            <!-- 动态插入 -->
+                        </div>
+                    </div>
+                    
+                    <!-- 模块七：系统趋势图 -->
+                    <div class="dashboard-section" style="flex: 1;">
+                        <h3 class="section-title">最近7天问答趋势</h3>
+                        <div id="trend-chart" style="width: 100%; height: 300px; background: white; border-radius: 12px; padding: 10px; border: 1px solid #e5e5ea;"></div>
+                    </div>
+                </div>
+
+                <!-- 模块四：最近问答记录 -->
+                <div class="dashboard-section" style="margin-top: 30px;">
+                    <h3 class="section-title">最近问答记录</h3>
+                    <div class="table-container" style="background: white; border: 1px solid #e5e5ea; border-radius: 8px; overflow: hidden; margin-top: 10px;">
+                        <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                            <thead style="background-color: #f9fafb; border-bottom: 1px solid #e5e5ea;">
+                                <tr>
+                                    <th style="padding: 12px 16px; font-weight: 500; color: #4b5563;">问题</th>
+                                    <th style="padding: 12px 16px; font-weight: 500; color: #4b5563;">知识库</th>
+                                    <th style="padding: 12px 16px; font-weight: 500; color: #4b5563;">时间</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recent-qa-list">
+                                <!-- 动态插入 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. 知识库管理 -->
+            <div id="knowledge-view" class="view-container" style="display: flex; flex-direction: column; padding: 24px; width: 100%;">
+                <!-- 知识库列表视图 -->
+                <div id="kb-list-container">
+                    <div class="kb-header">
+                        <h2>知识库管理</h2>
+                        <button class="action-btn btn-primary" onclick="showCreateModal()">
+                            + 新建知识库
+                        </button>
+                    </div>
+                    
+                    <div id="kb-list" class="kb-grid">
+                        <!-- 知识库卡片将通过JS动态插入 -->
+                    </div>
+                </div>
+
+                <!-- 知识库详情/文档管理视图 -->
+                <div id="kb-detail-container" style="display: none; height: 100%; flex-direction: column;">
+                    <div class="kb-header">
+                        <div style="display: flex; align-items: center;">
+                            <button class="action-btn btn-secondary" onclick="backToKBList()" style="margin-right: 12px;">← 返回</button>
+                            <h2 id="kbDetailTitle" style="margin-bottom: 0;">知识库详情</h2>
+                        </div>
+                        <div>
+                            <button class="action-btn btn-primary" onclick="openAIChat()">
+                                💬 AI 提问
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="upload-section" style="margin-top: 20px;">
+                        <div style="margin-bottom: 16px; display: flex; gap: 10px;">
+                            <button class="action-btn btn-primary" onclick="showManualInputModal()">
+                                ✍️ 手动输入
+                            </button>
+                            <input type="file" id="fileInput" accept=".txt,.pdf,.docx,.doc,.rtf,.md">
+                            <button class="upload-btn" id="uploadBtn" style="width: auto; padding: 6px 12px; border-radius: 6px; font-size: 13px;">
+                                📤 上传文档
+                            </button>
+                            <button class="action-btn btn-secondary" onclick="showDatasourceModal()">
+                                💾 连接数据库
+                            </button>
+                            <button class="clear-btn" id="clearBtn" style="width: auto; padding: 6px 12px; border-radius: 6px; font-size: 13px; margin-top: 0;">
+                                🗑️ 清除所有文档
+                            </button>
+                        </div>
+                        <div id="uploadStatus" class="upload-status" style="display: none;"></div>
+                    </div>
+                    
+                    <div style="margin-top: 20px; flex: 1; overflow-y: auto;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <h3 style="margin: 0; font-size: 18px; color: #111827;">文档列表</h3>
+                            <button class="action-btn btn-secondary" onclick="loadKnowledgeItems()">🔄 刷新</button>
+                        </div>
+                        <div class="table-container" style="background: white; border: 1px solid #e5e5ea; border-radius: 8px; overflow: hidden;">
+                            <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                                <thead style="background-color: #f9fafb; border-bottom: 1px solid #e5e5ea;">
+                                    <tr>
+                                        <th style="padding: 12px 16px; font-weight: 500; color: #4b5563;">标题/文件名</th>
+                                        <th style="padding: 12px 16px; font-weight: 500; color: #4b5563;">来源</th>
+                                        <th style="padding: 12px 16px; font-weight: 500; color: #4b5563;">分块数</th>
+                                        <th style="padding: 12px 16px; font-weight: 500; color: #4b5563;">状态</th>
+                                        <th style="padding: 12px 16px; font-weight: 500; color: #4b5563;">创建时间</th>
+                                        <th style="padding: 12px 16px; font-weight: 500; color: #4b5563; width: 80px;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="kb-item-list">
+                                    <!-- 列表内容通过 JS 渲染 -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 手动输入知识模态框 -->
+            <div id="manualInputModal" class="modal-overlay">
+                <div class="modal" style="width: 600px;">
+                    <div class="modal-header">
+                        <h3 class="modal-title">手动输入知识</h3>
+                        <button class="close-btn" onclick="closeManualInputModal()">×</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label class="form-label">标题</label>
+                            <input type="text" id="manualTitle" class="form-input" placeholder="请输入标题（例如：员工年假制度）">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">内容</label>
+                            <textarea id="manualContent" class="form-textarea" style="min-height: 200px;" placeholder="请输入知识内容..."></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="action-btn btn-secondary" onclick="closeManualInputModal()">取消</button>
+                        <button class="action-btn btn-primary" onclick="saveManualKnowledge()">提交</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 连接数据库模态框 -->
+            <div id="datasourceModal" class="modal-overlay">
+                <div class="modal" style="width: 500px;">
+                    <div class="modal-header">
+                        <h3 class="modal-title">连接数据库 (MySQL)</h3>
+                        <button class="close-btn" onclick="closeDatasourceModal()">×</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label class="form-label">数据源名称</label>
+                            <input type="text" id="dsName" class="form-input" placeholder="例如：学生信息库">
+                        </div>
+                        <div class="form-group" style="display: flex; gap: 10px;">
+                            <div style="flex: 2;">
+                                <label class="form-label">主机地址 (Host)</label>
+                                <input type="text" id="dsHost" class="form-input" value="localhost">
+                            </div>
+                            <div style="flex: 1;">
+                                <label class="form-label">端口 (Port)</label>
+                                <input type="number" id="dsPort" class="form-input" value="3306">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">数据库名 (Database)</label>
+                            <input type="text" id="dsDBName" class="form-input" placeholder="例如：student_db">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">用户名 (Username)</label>
+                            <input type="text" id="dsUser" class="form-input" value="root">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">密码 (Password)</label>
+                            <input type="password" id="dsPassword" class="form-input" placeholder="请输入数据库密码">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="action-btn btn-secondary" onclick="testDatasourceConnection()">测试连接</button>
+                        <button class="action-btn btn-primary" onclick="saveDatasource()">保存并连接</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 创建/编辑知识库模态框 -->
+            <div id="kbModal" class="modal-overlay">
+                <div class="modal">
+                    <div class="modal-header">
+                        <h3 class="modal-title" id="modalTitle">新建知识库</h3>
+                        <button class="close-btn" onclick="closeModal()">×</button>
+                    </div>
+                    <div class="modal-body">
+                        <input type="hidden" id="kbId">
+                        <div class="form-group">
+                            <label class="form-label">知识库名称</label>
+                            <input type="text" id="kbName" class="form-input" placeholder="请输入知识库名称">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">描述</label>
+                            <textarea id="kbDesc" class="form-textarea" placeholder="请输入知识库描述"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Embedding 模型</label>
+                            <select id="kbEmbedding" class="form-select">
+                                <option value="bge-large">bge-large (推荐)</option>
+                                <option value="text2vec-base">text2vec-base</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">向量数据库</label>
+                            <select id="kbVectorStore" class="form-select">
+                                <option value="faiss">FAISS (本地)</option>
+                                <option value="chroma">Chroma</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="action-btn btn-secondary" onclick="closeModal()">取消</button>
+                        <button class="action-btn btn-primary" onclick="saveKnowledgeBase()">保存</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. 数据源管理 -->
+            <div id="datasource-view" class="view-container" style="display: none; padding: 24px; width: 100%;">
+                <h2>数据源管理</h2>
+                <p>功能开发中...</p>
+            </div>
+
+            <!-- 4. AI对话助手 (原聊天功能) -->
+            <div id="chat-view" class="view-container" style="display: none; width: 100%; height: 100%;">
+                <div style="display: flex; height: 100%;">
+                    <!-- 左侧会话列表 -->
+                    <div class="chat-sidebar" style="width: 260px; background: #f9fafb; border-right: 1px solid #e5e5ea; display: flex; flex-direction: column;">
+                        <!-- 知识库选择器 -->
+                        <div style="padding: 16px 16px 0 16px;">
+                            <label style="font-size: 12px; color: #6b7280; font-weight: 500; display: block; margin-bottom: 6px;">当前知识库</label>
+                            <select id="chatKBSelector" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #d1d5db; font-size: 14px; outline: none; background: white;" onchange="onChatKBChange()">
+                                <option value="">请选择知识库...</option>
+                            </select>
+                        </div>
+                        
+                        <div style="padding: 16px; border-bottom: 1px solid #e5e5ea;">
+                            <button class="action-btn btn-primary" style="width: 100%;" onclick="createNewSession()">
+                                + 新建会话
+                            </button>
+                        </div>
+                        <div id="session-list" style="flex: 1; overflow-y: auto; padding: 10px;">
+                            <!-- 会话列表 -->
+                        </div>
+                    </div>
+
+                    <!-- 右侧聊天窗口 -->
+                    <div class="chat-container" style="flex: 1; border: none;">
+                        <div class="chat-header" style="padding: 12px 20px; border-bottom: 1px solid #e5e5ea; background: white; display: flex; justify-content: space-between; align-items: center;">
+                            <span id="current-session-title" style="font-weight: 600;">请选择或新建会话</span>
+                            <span id="current-kb-info" style="font-size: 12px; color: #6b7280; background: #f3f4f6; padding: 2px 8px; border-radius: 4px;"></span>
+                        </div>
+                        <div class="chat-messages" id="chatMessages">
+                            <div class="message ai">
+                                <div class="message-avatar">🤖</div>
+                                <div class="message-content">
+                                    请在左侧选择一个历史会话，或者点击“新建会话”开始提问。
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="chat-input-container">
+                            <div class="input-wrapper">
+                                <input type="text" id="userInput" placeholder="请输入您的问题..." disabled>
+                                <button id="sendBtn" disabled>发送</button>
+                                <button id="stopBtn">停止</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 5. 模型管理 -->
+            <div id="models-view" class="view-container" style="display: none; padding: 24px; width: 100%;">
+                <h2>模型管理</h2>
+                <p>功能开发中...</p>
+            </div>
+
+            <!-- 6. 系统管理 -->
+            <div id="system-view" class="view-container" style="display: none; padding: 24px; width: 100%;">
+                <h2>系统管理</h2>
+                <p>功能开发中...</p>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // 初始化显示知识库管理
+        document.addEventListener('DOMContentLoaded', () => {
+             // 默认显示系统看板
+             switchTab('dashboard'); 
+             
+             // 如果在 dashboard tab，加载数据
+             if (document.getElementById('dashboard-view').style.display !== 'none') {
+                 loadDashboardData();
+             }
+        });
+
+        function switchTab(tabId) {
+            // 隐藏所有视图
+            document.querySelectorAll('.view-container').forEach(el => {
+                el.style.display = 'none';
+            });
+            
+            // 显示目标视图
+            const targetView = document.getElementById(tabId + '-view');
+            if (targetView) {
+                if (tabId === 'chat') {
+                    targetView.style.display = 'block';
+                    targetView.style.height = '100%';
+                    
+                    // 加载知识库列表到选择器
+                    loadKBSelector();
+                    
+                    // 如果已经选了知识库，设置选择器并加载会话
+                    if (window.currentKBId) {
+                        const selector = document.getElementById('chatKBSelector');
+                        if (selector) selector.value = window.currentKBId;
+                        
+                        const kbInfo = document.getElementById('current-kb-info');
+                        if (kbInfo) kbInfo.textContent = window.currentKBName || '';
+                        
+                        if (typeof loadSessions === 'function') {
+                            loadSessions(window.currentKBId);
+                        }
+                    } else {
+                        const sessionList = document.getElementById('session-list');
+                        if (sessionList) sessionList.innerHTML = '<div style="text-align:center; padding:10px; color:#666;">请在上方选择一个知识库</div>';
+                    }
+                } else if (tabId === 'knowledge') {
+                     targetView.style.display = 'flex';
+                     loadKnowledgeBases(); // 切换到知识库标签时加载列表
+                } else if (tabId === 'dashboard') {
+                    targetView.style.display = 'block';
+                    loadDashboardData(); // 加载看板数据
+                } else {
+                    targetView.style.display = 'block';
+                }
+            }
+
+            // 更新菜单激活状态
+            document.querySelectorAll('.menu-item').forEach(el => {
+                el.classList.remove('active');
+            });
+            // 找到对应的菜单项并激活 (简单处理)
+            const menuItems = document.querySelectorAll('.menu-item');
+            if (tabId === 'dashboard') menuItems[0].classList.add('active');
+            if (tabId === 'knowledge') menuItems[1].classList.add('active');
+            if (tabId === 'datasource') menuItems[2].classList.add('active');
+            if (tabId === 'chat') menuItems[3].classList.add('active');
+            if (tabId === 'models') menuItems[4].classList.add('active');
+            if (tabId === 'system') menuItems[5].classList.add('active');
+        }
+
+        // --- Dashboard 逻辑 ---
+         let trendChart = null;
+         
+         // 加载知识库选择器
+         function loadKBSelector() {
+             const selector = document.getElementById('chatKBSelector');
+             if (!selector) return; // 容错
+             
+             fetch('/api/knowledge/list')
+                 .then(res => res.json())
+                 .then(data => {
+                     // 清空除了第一个的所有选项
+                     while (selector.options.length > 1) {
+                         selector.remove(1);
+                     }
+                     
+                     data.forEach(kb => {
+                         const option = document.createElement('option');
+                         option.value = kb.id;
+                         option.textContent = kb.name;
+                         selector.appendChild(option);
+                     });
+                     
+                     // 如果当前有选中的 KB，设置它
+                     if (window.currentKBId) {
+                         selector.value = window.currentKBId;
+                     }
+                 })
+                 .catch(err => console.error('Load KB list error:', err));
+         }
+         
+         // 切换知识库
+         function onChatKBChange() {
+             const selector = document.getElementById('chatKBSelector');
+             const kbId = selector.value;
+             const kbName = selector.options[selector.selectedIndex].textContent;
+             
+             if (!kbId) {
+                 window.currentKBId = null;
+                 window.currentKBName = '';
+                 document.getElementById('session-list').innerHTML = '';
+                 document.getElementById('chatMessages').innerHTML = '<div class="message ai"><div class="message-avatar">🤖</div><div class="message-content">请选择一个知识库开始对话。</div></div>';
+                 return;
+             }
+             
+             window.currentKBId = kbId;
+             window.currentKBName = kbName;
+             
+             // 持久化
+             localStorage.setItem('currentKBId', kbId);
+             localStorage.setItem('currentKBName', kbName);
+             
+             // 更新 UI
+             const kbInfo = document.getElementById('current-kb-info');
+             if (kbInfo) kbInfo.textContent = kbName;
+             
+             // 加载会话
+             if (typeof loadSessions === 'function') {
+                 loadSessions(kbId);
+             }
+             
+             // 清空聊天区域，提示新建或选择会话
+             const chatMessages = document.getElementById('chatMessages');
+             chatMessages.innerHTML = `
+                <div class="message ai">
+                    <div class="message-avatar">🤖</div>
+                    <div class="message-content">
+                        已切换到知识库：<strong>${kbName}</strong>。<br>
+                        请在左侧选择一个历史会话，或者点击“新建会话”开始提问。
+                    </div>
+                </div>`;
+             document.getElementById('current-session-title').textContent = '请选择或新建会话';
+             document.getElementById('userInput').disabled = true;
+             document.getElementById('sendBtn').disabled = true;
+             currentSessionId = null;
+         }
+
+         function loadDashboardData() {
+            fetch('/api/dashboard/stats')
+                .then(res => res.json())
+                .then(data => {
+                    renderOverallStats(data.overall);
+                    renderTodayStats(data.today);
+                    renderKBDataStats(data.knowledge);
+                    renderTrendChart(data.trend);
+                    renderRecentQA(data.recent_qa);
+                })
+                .catch(err => console.error('Dashboard load error:', err));
+        }
+
+        function renderOverallStats(data) {
+            const container = document.getElementById('overall-stats');
+            container.innerHTML = `
+                <div class="stat-card primary">
+                    <h3>知识库数量</h3>
+                    <p>${data.kb_count}</p>
+                </div>
+                <div class="stat-card success">
+                    <h3>文档数量</h3>
+                    <p>${data.doc_count}</p>
+                </div>
+                <div class="stat-card warning">
+                    <h3>数据源数量</h3>
+                    <p>${data.ds_count}</p>
+                </div>
+                <div class="stat-card danger">
+                    <h3>总问答数</h3>
+                    <p>${data.qa_count}</p>
+                </div>
+            `;
+        }
+
+        function renderTodayStats(data) {
+            const container = document.getElementById('today-stats');
+            container.innerHTML = `
+                <div class="stat-card primary">
+                    <h3>今日问答数</h3>
+                    <p>${data.qa_count}</p>
+                </div>
+                <div class="stat-card success">
+                    <h3>今日新增文档</h3>
+                    <p>${data.doc_count}</p>
+                </div>
+                <div class="stat-card warning">
+                    <h3>今日新增知识库</h3>
+                    <p>${data.kb_count}</p>
+                </div>
+                <div class="stat-card danger">
+                    <h3>今日新增数据源</h3>
+                    <p>${data.ds_count}</p>
+                </div>
+            `;
+        }
+
+        function renderKBDataStats(data) {
+            const container = document.getElementById('kb-data-stats');
+            container.innerHTML = `
+                <div class="stat-card primary">
+                    <h3>文档分块数量</h3>
+                    <p>${data.chunk_count}</p>
+                </div>
+                <div class="stat-card warning">
+                    <h3>数据库表数量</h3>
+                    <p>${data.table_count}</p>
+                </div>
+                <div class="stat-card success">
+                    <h3>数据库字段数量</h3>
+                    <p>${data.column_count}</p>
+                </div>
+            `;
+        }
+
+        function renderRecentQA(data) {
+            const tbody = document.getElementById('recent-qa-list');
+            tbody.innerHTML = '';
+            if (!data || data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; padding: 20px; color: #6b7280;">暂无数据</td></tr>';
+                return;
+            }
+            
+            data.forEach(item => {
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid #e5e5ea';
+                tr.innerHTML = `
+                    <td style="padding: 12px 16px;">${item.question}</td>
+                    <td style="padding: 12px 16px;">${item.kb_name}</td>
+                    <td style="padding: 12px 16px; color: #6b7280;">${item.time}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function renderTrendChart(data) {
+            if (!trendChart) {
+                trendChart = echarts.init(document.getElementById('trend-chart'));
+            }
+            
+            const dates = data.map(item => item.date);
+            const counts = data.map(item => item.count);
+            
+            const option = {
+                tooltip: {
+                    trigger: 'axis'
+                },
+                grid: {
+                    left: '3%',
+                    right: '4%',
+                    bottom: '3%',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    boundaryGap: false,
+                    data: dates
+                },
+                yAxis: {
+                    type: 'value',
+                    minInterval: 1
+                },
+                series: [
+                    {
+                        name: '问答数',
+                        type: 'line',
+                        data: counts,
+                        smooth: true,
+                        areaStyle: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: 'rgba(59, 130, 246, 0.5)' },
+                                { offset: 1, color: 'rgba(59, 130, 246, 0.05)' }
+                            ])
+                        },
+                        itemStyle: {
+                            color: '#3b82f6'
+                        }
+                    }
+                ]
+            };
+            
+            trendChart.setOption(option);
+            
+            // Resize handler
+            window.addEventListener('resize', () => {
+                trendChart.resize();
+            });
+        }
+
+        // --- 知识库管理逻辑 ---
+
+        // 管理文档
+        window.currentKBId = null;
+        window.currentKBName = '';
+
+        function manageDocs(id, name) {
+            window.currentKBId = id;
+            window.currentKBName = name;
+            
+            // Persist state
+            localStorage.setItem('currentKBId', id);
+            localStorage.setItem('currentKBName', name);
+
+            document.getElementById('kb-list-container').style.display = 'none';
+            document.getElementById('kb-detail-container').style.display = 'flex';
+            document.getElementById('kbDetailTitle').textContent = name;
+            loadKnowledgeItems(); // 加载文档列表
+        }
+
+        // --- 文档列表管理 ---
+        function loadKnowledgeItems() {
+            if (!window.currentKBId) return;
+            
+            const tbody = document.getElementById('kb-item-list');
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px;">加载中...</td></tr>';
+            
+            fetch(`/api/knowledge/items/${window.currentKBId}`)
+                .then(response => response.json())
+                .then(data => {
+                    tbody.innerHTML = '';
+                    if (data.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #6b7280;">暂无数据</td></tr>';
+                        return;
+                    }
+                    
+                    data.forEach(item => {
+                        const tr = document.createElement('tr');
+                        tr.style.borderBottom = '1px solid #e5e5ea';
+                        
+                        const sourceTypeMap = {
+                            'manual': '✍️ 手动输入',
+                            'file': '📄 文档上传'
+                        };
+                        const statusMap = {
+                            'processing': '<span style="color: #d97706;">处理中</span>',
+                            'finished': '<span style="color: #059669;">已完成</span>',
+                            'error': '<span style="color: #dc2626;">失败</span>'
+                        };
+                        
+                        tr.innerHTML = `
+                            <td style="padding: 12px 16px; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${item.title || item.file_name}">${item.title || item.file_name || '未命名'}</td>
+                            <td style="padding: 12px 16px;">${sourceTypeMap[item.source_type] || item.source_type}</td>
+                            <td style="padding: 12px 16px;">${item.chunk_count}</td>
+                            <td style="padding: 12px 16px;">${statusMap[item.status] || item.status}</td>
+                            <td style="padding: 12px 16px; color: #6b7280; font-size: 13px;">${item.create_time}</td>
+                            <td style="padding: 12px 16px;">
+                                <button class="action-btn btn-danger" style="padding: 4px 8px;" onclick="deleteKnowledgeItem(${item.id})">删除</button>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #dc2626;">加载失败</td></tr>';
+                });
+        }
+        
+        function deleteKnowledgeItem(itemId) {
+            if (confirm('确定要删除该数据吗？相关的向量数据也会被移除。')) {
+                fetch(`/api/knowledge/item/${itemId}`, { method: 'DELETE' })
+                    .then(response => {
+                        if (response.ok) {
+                            loadKnowledgeItems();
+                        } else {
+                            alert('删除失败');
+                        }
+                    })
+                    .catch(error => alert('删除出错: ' + error.message));
+            }
+        }
+
+        function openAIChat() {
+            // 切换到聊天视图
+            switchTab('chat');
+            
+            const chatMessages = document.getElementById('chatMessages');
+            chatMessages.innerHTML = '';
+            
+            // Update header info
+            const kbInfo = document.getElementById('current-kb-info');
+            if (kbInfo) kbInfo.textContent = window.currentKBName || '';
+
+            // Add system hint
+            const systemMsg = document.createElement('div');
+            systemMsg.className = 'message ai';
+            systemMsg.innerHTML = `
+                <div class="message-avatar">🤖</div>
+                <div class="message-content">
+                    已切换到知识库：<strong>${window.currentKBName}</strong>。<br>
+                    请在左侧选择一个历史会话，或者点击“新建会话”开始提问。
+                </div>
+            `;
+            chatMessages.appendChild(systemMsg);
+            
+            // Load sessions
+            if (window.currentKBId && typeof loadSessions === 'function') {
+                loadSessions(window.currentKBId);
+            }
+        }
+
+        // 数据库连接模态框
+        const datasourceModal = document.getElementById('datasourceModal');
+
+        function showDatasourceModal() {
+            // 重置表单
+            document.getElementById('dsName').value = '';
+            document.getElementById('dsHost').value = 'localhost';
+            document.getElementById('dsPort').value = '3306';
+            document.getElementById('dsDBName').value = '';
+            document.getElementById('dsUser').value = 'root';
+            document.getElementById('dsPassword').value = '';
+            
+            datasourceModal.style.display = 'flex';
+        }
+
+        function closeDatasourceModal() {
+            datasourceModal.style.display = 'none';
+        }
+
+        function getDatasourceForm() {
+            return {
+                datasourceName: document.getElementById('dsName').value.trim(),
+                dbType: 'mysql',
+                host: document.getElementById('dsHost').value.trim(),
+                port: parseInt(document.getElementById('dsPort').value),
+                databaseName: document.getElementById('dsDBName').value.trim(),
+                username: document.getElementById('dsUser').value.trim(),
+                password: document.getElementById('dsPassword').value
+            };
+        }
+
+        function testDatasourceConnection() {
+            const data = getDatasourceForm();
+            if (!data.host || !data.databaseName || !data.username) {
+                alert('请填写完整的连接信息');
+                return;
+            }
+
+            fetch('/api/datasource/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('连接失败: ' + data.error);
+                } else {
+                    alert('✅ ' + data.message);
+                }
+            })
+            .catch(error => alert('请求失败: ' + error.message));
+        }
+
+        function saveDatasource() {
+            const data = getDatasourceForm();
+            if (!data.datasourceName || !data.host || !data.databaseName || !data.username) {
+                alert('请填写完整的连接信息');
+                return;
+            }
+            
+            data.knowledgeId = window.currentKBId;
+
+            fetch('/api/datasource/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('保存失败: ' + data.error);
+                } else {
+                    alert('数据源添加成功！');
+                    closeDatasourceModal();
+                    loadKnowledgeItems(); // 刷新列表
+                }
+            })
+            .catch(error => alert('请求失败: ' + error.message));
+        }
+
+        // 手动输入知识模态框
+        const manualInputModal = document.getElementById('manualInputModal');
+
+        function showManualInputModal() {
+            document.getElementById('manualTitle').value = '';
+            document.getElementById('manualContent').value = '';
+            manualInputModal.style.display = 'flex';
+        }
+
+        function closeManualInputModal() {
+            manualInputModal.style.display = 'none';
+        }
+
+        function saveManualKnowledge() {
+            const title = document.getElementById('manualTitle').value.trim();
+            const content = document.getElementById('manualContent').value.trim();
+
+            if (!content) {
+                alert('请输入知识内容');
+                return;
+            }
+
+            fetch('/api/knowledge/data/manual', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    knowledgeId: window.currentKBId,
+                    title: title,
+                    content: content
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('添加失败: ' + data.error);
+                } else {
+                    alert('知识添加成功！生成了 ' + data.chunks_count + ' 个切片。');
+                    closeManualInputModal();
+                    loadKnowledgeItems(); // 刷新文档列表
+                }
+            })
+            .catch(error => {
+                alert('添加失败: ' + error.message);
+            });
+        }
+
+        function backToKBList() {
+            window.currentKBId = null;
+            window.currentKBName = '';
+            
+            // Clear state
+            localStorage.removeItem('currentKBId');
+            localStorage.removeItem('currentKBName');
+
+            document.getElementById('kb-detail-container').style.display = 'none';
+            document.getElementById('kb-list-container').style.display = 'block';
+            loadKnowledgeBases(); // 刷新列表
+        }
+
+        // 修改 loadKnowledgeBases 中的 manageDocs 调用
+        function loadKnowledgeBases() {
+            fetch('/api/knowledge/list')
+                .then(response => response.json())
+                .then(data => {
+                    const kbList = document.getElementById('kb-list');
+                    kbList.innerHTML = '';
+                    
+                    if (data.length === 0) {
+                        kbList.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #6b7280; padding: 40px;">暂无知识库，请创建</div>';
+                        return;
+                    }
+
+                    data.forEach(kb => {
+                        const card = document.createElement('div');
+                        card.className = 'kb-card';
+                        card.innerHTML = `
+                            <div class="kb-title">${kb.name}</div>
+                            <div class="kb-desc">${kb.description || '暂无描述'}</div>
+                            <div class="kb-meta">
+                                <span>📚 ${kb.embedding_model}</span>
+                                <span>📅 ${kb.create_time.split(' ')[0]}</span>
+                            </div>
+                            <div class="kb-actions">
+                                <button class="action-btn btn-secondary" onclick="editKB(${kb.id}, '${kb.name}', '${kb.description || ''}', '${kb.embedding_model}', '${kb.vector_store}')">编辑</button>
+                                <button class="action-btn btn-danger" onclick="deleteKB(${kb.id}, '${kb.name}')">删除</button>
+                                <button class="action-btn btn-primary" style="margin-left: auto;" onclick="manageDocs(${kb.id}, '${kb.name}')">管理文档</button>
+                            </div>
+                        `;
+                        kbList.appendChild(card);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading knowledge bases:', error);
+                    alert('加载知识库列表失败');
+                });
+        }
+
+        // 模态框控制
+        const modal = document.getElementById('kbModal');
+        
+        function showCreateModal() {
+            document.getElementById('modalTitle').textContent = '新建知识库';
+            document.getElementById('kbId').value = '';
+            document.getElementById('kbName').value = '';
+            document.getElementById('kbDesc').value = '';
+            document.getElementById('kbEmbedding').value = 'bge-large';
+            document.getElementById('kbVectorStore').value = 'faiss';
+            modal.style.display = 'flex';
+        }
+
+        function editKB(id, name, desc, embedding, vectorStore) {
+            document.getElementById('modalTitle').textContent = '编辑知识库';
+            document.getElementById('kbId').value = id;
+            document.getElementById('kbName').value = name;
+            document.getElementById('kbDesc').value = desc;
+            document.getElementById('kbEmbedding').value = embedding;
+            document.getElementById('kbVectorStore').value = vectorStore;
+            modal.style.display = 'flex';
+        }
+
+        function closeModal() {
+            modal.style.display = 'none';
+        }
+
+        // 保存知识库 (新增/更新)
+        function saveKnowledgeBase() {
+            const id = document.getElementById('kbId').value;
+            const name = document.getElementById('kbName').value.trim();
+            const desc = document.getElementById('kbDesc').value.trim();
+            const embedding = document.getElementById('kbEmbedding').value;
+            const vectorStore = document.getElementById('kbVectorStore').value;
+
+            if (!name) {
+                alert('请输入知识库名称');
+                return;
+            }
+
+            const url = id ? '/api/knowledge/update' : '/api/knowledge/create';
+            const method = id ? 'PUT' : 'POST';
+            const body = {
+                name: name,
+                description: desc,
+                embedding_model: embedding,
+                vector_store: vectorStore
+            };
+            
+            if (id) {
+                body.id = id;
+            }
+
+            fetch(url, {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            })
+            .then(response => {
+                if (response.ok) {
+                    closeModal();
+                    loadKnowledgeBases(); // 刷新列表
+                } else {
+                    return response.json().then(err => { throw new Error(err.error || '保存失败'); });
+                }
+            })
+            .catch(error => {
+                alert('保存失败: ' + error.message);
+            });
+        }
+
+        // 删除知识库
+        function deleteKB(id, name) {
+            if (confirm(`确定要删除知识库 "${name}" 吗？此操作不可恢复。`)) {
+                fetch(`/api/knowledge/delete/${id}`, {
+                    method: 'DELETE'
+                })
+                .then(response => {
+                    if (response.ok) {
+                        loadKnowledgeBases();
+                    } else {
+                        alert('删除失败');
+                    }
+                })
+                .catch(error => {
+                    alert('删除失败: ' + error.message);
+                });
+            }
+        }
+        // 侧边栏折叠
+        function toggleSidebar() {
+            const sidebar = document.getElementById('mainSidebar');
+            const icon = sidebar.querySelector('.toggle-btn i');
+            sidebar.classList.toggle('collapsed');
+            
+            if (sidebar.classList.contains('collapsed')) {
+                icon.textContent = '▶';
+            } else {
+                icon.textContent = '◀';
+            }
+        }
+    </script>
+    <script src="chat.js"></script>
+</body>
+</html>
