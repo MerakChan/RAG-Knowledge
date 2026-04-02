@@ -1,0 +1,12 @@
+USE rag_platform;
+
+CREATE TABLE IF NOT EXISTS app_user (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '用户ID',
+    username VARCHAR(64) NOT NULL UNIQUE COMMENT '登录用户名',
+    password_hash VARCHAR(255) NOT NULL COMMENT '密码哈希',
+    nickname VARCHAR(100) NULL COMMENT '昵称',
+    status VARCHAR(20) NOT NULL DEFAULT 'active' COMMENT 'active/inactive',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    INDEX idx_app_user_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统用户表';

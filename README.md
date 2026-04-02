@@ -65,13 +65,13 @@ ai-knowledge-platform/
 
 ### 2. 数据库配置
 
-1. 在 MySQL 中创建一个名为 `myfinal-work` 的数据库，字符集设置为 `utf8mb4`。
+1. 在 MySQL 中创建一个名为 `rag_platform` 的数据库，字符集设置为 `utf8mb4`。
    ```sql
-   CREATE DATABASE `myfinal-work` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   CREATE DATABASE `rag_platform` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
    ```
-2. 修改 `backend/database.py` 中的 `DB_URL` 为您本地的 MySQL 连接信息：
+2. 修改 `backend/database.py` 中的 `DB_URL`，或者直接设置环境变量 `DB_URL` 为您本地的 MySQL 连接信息：
    ```python
-   DB_URL = "mysql+pymysql://root:你的密码@localhost:3306/myfinal-work?charset=utf8mb4"
+   DB_URL = "mysql+pymysql://root:你的密码@localhost:3306/rag_platform?charset=utf8mb4"
    ```
 
 ### 3. 安装依赖
