@@ -27,6 +27,10 @@ class ModelConfigService:
                     "source": "builtin",
                     "editable": False,
                     "description": "默认集成的 DeepSeek 通用对话模型，适合常规 RAG 问答场景。",
+                    "type": "cloud",
+                    "enabled": True,
+                    "tags": ["推理强", "速度快", "通用对话"],
+                    "auto_tags": ["通用对话", "知识库问答", "文本总结"]
                 },
                 {
                     "id": "builtin-deepseek-reasoner",
@@ -38,6 +42,10 @@ class ModelConfigService:
                     "source": "builtin",
                     "editable": False,
                     "description": "偏推理与复杂分析的 DeepSeek 模型，适合结构化推断场景。",
+                    "type": "cloud",
+                    "enabled": True,
+                    "tags": ["推理强", "逻辑分析", "复杂任务"],
+                    "auto_tags": ["逻辑推理", "复杂分析", "知识图谱构建"]
                 },
             ],
             "custom_models": [],
@@ -46,6 +54,19 @@ class ModelConfigService:
                 {"id": "bge-m3", "name": "BGE M3", "description": "支持多语言与多粒度召回的向量模型"},
                 {"id": "text-embedding-3-large", "name": "Text Embedding 3 Large", "description": "OpenAI 兼容向量模型，可用于外部 API 接入"},
             ],
+            "task_assignments": {
+                "chat": "builtin-deepseek-chat",
+                "rag": "builtin-deepseek-chat",
+                "summary": "builtin-deepseek-chat",
+                "knowledge_graph": "builtin-deepseek-reasoner",
+                "multi_doc_analysis": "builtin-deepseek-reasoner",
+                "knowledge_trace": "builtin-deepseek-chat"
+            },
+            "scheduling_strategy": "fixed",
+            "fallback_models": {
+                "builtin-deepseek-chat": ["builtin-deepseek-reasoner"],
+                "builtin-deepseek-reasoner": ["builtin-deepseek-chat"]
+            }
         }
 
     def _merge_builtin_models(self, config):
@@ -67,6 +88,14 @@ class ModelConfigService:
                 merged_model["base_url"] = base["base_url"]
             if not merged_model.get("model_name") and base.get("model_name"):
                 merged_model["model_name"] = base["model_name"]
+            if "type" not in merged_model and base.get("type"):
+                merged_model["type"] = base["type"]
+            if "enabled" not in merged_model and "enabled" in base:
+                merged_model["enabled"] = base["enabled"]
+            if "tags" not in merged_model and base.get("tags"):
+                merged_model["tags"] = base["tags"]
+            if "auto_tags" not in merged_model and base.get("auto_tags"):
+                merged_model["auto_tags"] = base["auto_tags"]
 
             merged.append(merged_model)
             if model_id:
@@ -94,6 +123,9 @@ class ModelConfigService:
         data.setdefault("builtin_models", default_config["builtin_models"])
         data.setdefault("custom_models", [])
         data.setdefault("embedding_options", default_config["embedding_options"])
+        data.setdefault("task_assignments", default_config["task_assignments"])
+        data.setdefault("scheduling_strategy", default_config["scheduling_strategy"])
+        data.setdefault("fallback_models", default_config["fallback_models"])
         data = self._merge_builtin_models(data)
         return data
 
@@ -209,6 +241,10 @@ class ModelConfigService:
             "source": "custom",
             "editable": True,
             "description": payload.get("description", "").strip() or "用户自定义接入的 OpenAI 兼容模型 API。",
+            "type": payload.get("type", "cloud"),
+            "enabled": payload.get("enabled", True) if existing is None else existing.get("enabled", True),
+            "tags": payload.get("tags", []) if existing is None else existing.get("tags", []),
+            "auto_tags": payload.get("auto_tags", []) if existing is None else existing.get("auto_tags", []),
         }
 
         if existing:
@@ -253,3 +289,106 @@ class ModelConfigService:
 
         self._write(config)
         return self.list_models()
+
+    def update_model_status(self, model_id, enabled):
+        config = self._read()
+        all_models = config["builtin_models"] + config["custom_models"]
+        for model in all_models:
+            if model["id"] == model_id:
+                model["enabled"] = enabled
+                break
+        self._write(config)
+        return self.list_models()
+
+    def update_model_tags(self, model_id, tags):
+        config = self._read()
+        all_models = config["builtin_models"] + config["custom_models"]
+        for model in all_models:
+            if model["id"] == model_id:
+                model["tags"] = tags or []
+                break
+        self._write(config)
+        return self.list_models()
+
+    def update_model_type(self, model_id, model_type):
+        config = self._read()
+        all_models = config["builtin_models"] + config["custom_models"]
+        for model in all_models:
+            if model["id"] == model_id:
+                model["type"] = model_type
+                break
+        self._write(config)
+        return self.list_models()
+
+    def get_task_assignments(self):
+        config = self._read()
+        return {
+            "task_assignments": config.get("task_assignments", {}),
+            "scheduling_strategy": config.get("scheduling_strategy", "fixed"),
+            "fallback_models": config.get("fallback_models", {})
+        }
+
+    def update_task_assignment(self, task_type, model_id):
+        config = self._read()
+        if "task_assignments" not in config:
+            config["task_assignments"] = {}
+        config["task_assignments"][task_type] = model_id
+        self._write(config)
+        return self.get_task_assignments()
+
+    def update_scheduling_strategy(self, strategy):
+        if strategy not in ["fixed", "tag", "fallback"]:
+            raise ValueError("Invalid scheduling strategy")
+        config = self._read()
+        config["scheduling_strategy"] = strategy
+        self._write(config)
+        return self.get_task_assignments()
+
+    def update_fallback_models(self, model_id, fallback_ids):
+        config = self._read()
+        if "fallback_models" not in config:
+            config["fallback_models"] = {}
+        config["fallback_models"][model_id] = fallback_ids or []
+        self._write(config)
+        return self.get_task_assignments()
+
+    def get_model_for_task(self, task_type):
+        config = self._read()
+        strategy = config.get("scheduling_strategy", "fixed")
+        task_assignments = config.get("task_assignments", {})
+        fallback_models = config.get("fallback_models", {})
+        all_models = config["builtin_models"] + config["custom_models"]
+        
+        if strategy == "fixed":
+            model_id = task_assignments.get(task_type)
+            if model_id:
+                model = next((m for m in all_models if m["id"] == model_id and m.get("enabled", True)), None)
+                if model:
+                    return model
+                if fallback_models.get(model_id):
+                    for fallback_id in fallback_models[model_id]:
+                        fallback = next((m for m in all_models if m["id"] == fallback_id and m.get("enabled", True)), None)
+                        if fallback:
+                            return fallback
+        
+        elif strategy == "tag":
+            task_tag_map = {
+                "chat": "通用对话",
+                "rag": "知识库问答",
+                "summary": "文本总结",
+                "knowledge_graph": "知识图谱构建",
+                "multi_doc_analysis": "复杂分析",
+                "knowledge_trace": "知识库问答"
+            }
+            target_tag = task_tag_map.get(task_type)
+            if target_tag:
+                for model in all_models:
+                    if model.get("enabled", True):
+                        all_tags = (model.get("tags", []) + model.get("auto_tags", []))
+                        if target_tag in all_tags:
+                            return model
+        
+        enabled_models = [m for m in all_models if m.get("enabled", True)]
+        if enabled_models:
+            return enabled_models[0]
+        return all_models[0]

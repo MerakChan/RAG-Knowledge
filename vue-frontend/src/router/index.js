@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Login from '../views/Login.vue'
 import Main from '../views/Main.vue'
+import Dashboard from '../views/Dashboard.vue'
 import { isAuthenticated } from '../utils/auth'
 
 const routes = [
@@ -8,6 +9,11 @@ const routes = [
     path: '/',
     name: 'Login',
     component: Login
+  },
+  {
+    path: '/dashboard',
+    name: 'Dashboard',
+    component: Dashboard
   },
   {
     path: '/main',
@@ -24,7 +30,7 @@ const router = createRouter({
 router.beforeEach((to) => {
   const authed = isAuthenticated()
   if (to.path === '/' && authed) {
-    return '/main'
+    return '/dashboard'
   }
   if (to.path !== '/' && !authed) {
     return '/'

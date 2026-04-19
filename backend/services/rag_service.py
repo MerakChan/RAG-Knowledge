@@ -477,3 +477,839 @@ SQL："""
                 return content
             return f"[思考]：\n{reasoning}\n\n[回答]：\n{content}"
         return content or reasoning
+
+    def _parse_intent(self, user_query):
+        """
+        意图解析：判断用户问题类型
+        返回：{"task_type": "compare|summarize|relation", "keywords": [...]}
+        """
+        query = str(user_query or "").lower()
+        
+        compare_keywords = ["对比", "区别", "差异", "不同", "比较", "异同", "优缺点"]
+        summarize_keywords = ["总结", "归纳", "概括", "整理", "综述", "要点"]
+        relation_keywords = ["关系", "联系", "关联", "影响", "依赖", "作用", "如何"]
+        
+        task_type = "summarize"
+        keywords = []
+        
+        if any(keyword in query for keyword in compare_keywords):
+            task_type = "compare"
+        elif any(keyword in query for keyword in relation_keywords):
+            task_type = "relation"
+        
+        # 提取关键词（简单规则）
+        import re
+        words = re.findall(r'[\u4e00-\u9fa5a-zA-Z0-9]+', query)
+        keywords = [word for word in words if len(word) >= 2][:10]
+        
+        return {
+            "task_type": task_type,
+            "keywords": keywords
+        }
+
+    def _search_multi_documents(self, user_query, doc_ids, top_k=3, knowledge_id=None):
+        """
+        多文档向量检索：对每个文档单独检索最相关的片段
+        返回：按文档分组的检索结果
+        """
+        from database import SessionLocal, KnowledgeItem
+        
+        db = SessionLocal()
+        try:
+            doc_items = db.query(KnowledgeItem).filter(KnowledgeItem.id.in_(doc_ids)).all()
+            doc_title_map = {str(item.id): (item.title or item.file_name or "未命名文档") for item in doc_items}
+            
+            doc_results = {}
+            for doc_id in doc_ids:
+                # 使用正确的 ChromaDB where 查询语法和正确的字段名
+                where = {
+                    "$and": [
+                        {"knowledge_id": str(knowledge_id)},
+                        {"item_id": str(doc_id)}
+                    ]
+                }
+                search_results = self.vector_service.similarity_search(
+                    user_query,
+                    n_results=top_k,
+                    where=where
+                )
+                documents = search_results["documents"][0] if search_results.get("documents") else []
+                metadatas = search_results["metadatas"][0] if search_results.get("metadatas") else []
+                
+                if documents:
+                    doc_results[doc_id] = {
+                        "title": doc_title_map.get(str(doc_id), "未命名文档"),
+                        "chunks": [
+                            {"content": doc, "metadata": meta}
+                            for doc, meta in zip(documents, metadatas)
+                        ]
+                    }
+            return doc_results
+        finally:
+            db.close()
+
+    def _build_multi_doc_context(self, doc_results, max_chunks_per_doc=3):
+        """
+        构建多文档上下文
+        """
+        sections = []
+        total_tokens = 0
+        
+        for doc_id, data in doc_results.items():
+            title = data.get("title", f"文档{doc_id}")
+            chunks = data.get("chunks", [])[:max_chunks_per_doc]
+            
+            sections.append(f"[文档 {title}]")
+            for i, chunk in enumerate(chunks, 1):
+                content = chunk["content"][:1000]  # 限制每个片段长度
+                sections.append(f"片段{i}：{content}")
+            sections.append("")
+        
+        return "\n".join(sections).strip()
+
+    def _build_multi_doc_prompt(self, user_query, doc_context, intent_info):
+        """
+        构建多文档分析的Prompt
+        """
+        task_type = intent_info.get("task_type", "summarize")
+        
+        task_desc = {
+            "compare": "对比分析：重点关注多个文档之间的区别和差异",
+            "summarize": "总结归纳：综合多个文档的核心内容",
+            "relation": "关系提取：梳理文档中概念和内容之间的关系"
+        }.get(task_type, "综合分析")
+        
+        prompt = f"""你是一名专业的知识分析助手，请基于提供的多个文档内容完成分析任务。
+
+【任务类型】
+{task_desc}
+
+【用户要求】
+{user_query}
+
+【文档内容】
+{doc_context or '当前没有可用的文档内容。'}
+
+【分析要求】
+1. 请综合多个文档进行分析，而不是逐个总结
+2. 明确指出不同文档之间的相同点和差异点
+3. 如果存在冲突，请指出并解释
+4. 输出结构清晰，建议使用分点或表格形式
+5. 不要编造未提供的信息
+
+【输出格式】
+- 核心结论
+- 主要相同点
+- 主要差异点
+- 补充说明（可选）
+
+请开始分析："""
+        return prompt
+
+    def multi_doc_analysis(self, user_query, doc_ids, knowledge_id=None, user_id=None):
+        """
+        多文档联合分析完整流程
+        """
+        try:
+            # 1. 意图解析
+            intent_info = self._parse_intent(user_query)
+            
+            # 2. 多文档向量检索
+            doc_results = self._search_multi_documents(
+                user_query,
+                doc_ids,
+                top_k=3,
+                knowledge_id=knowledge_id
+            )
+            
+            if not doc_results:
+                return {
+                    "success": False,
+                    "error": "未检索到相关文档内容，请检查选择的文档是否有数据",
+                    "intent": intent_info
+                }
+            
+            # 3. 上下文构建
+            doc_context = self._build_multi_doc_context(doc_results, max_chunks_per_doc=3)
+            
+            # 4. 构建Prompt并调用大模型
+            prompt = self._build_multi_doc_prompt(user_query, doc_context, intent_info)
+            analysis_result = self.call_deepseek_api(prompt, stream=False, user_id=user_id)
+            
+            # 5. 整理返回结果
+            return {
+                "success": True,
+                "intent": intent_info,
+                "documents_used": list(doc_results.keys()),
+                "doc_titles": {str(k): v["title"] for k, v in doc_results.items()},
+                "analysis": analysis_result,
+                "raw_context": doc_context
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"多文档分析失败：{str(e)}"
+            }
+
+    def _extract_entities(self, text_content):
+        """
+        实体抽取：从文本中提取关键技术概念、模型名称和重要术语
+        """
+        prompt = f"""请从以下内容中提取关键技术概念、模型名称和重要术语。
+
+【文本内容】
+{text_content}
+
+【输出要求】
+请以JSON格式输出，包含以下字段：
+- concepts: 概念列表
+- technologies: 技术/工具列表
+- models: 模型列表
+- documents: 文档列表
+
+【输出格式示例】
+{{
+  "concepts": ["RAG", "Embedding", "向量数据库"],
+  "technologies": ["Redis", "MySQL", "Spring Boot"],
+  "models": ["GPT", "DeepSeek", "BERT"],
+  "documents": ["论文A", "笔记B"]
+}}
+
+请直接输出JSON，不要包含其他说明文字。"""
+
+        try:
+            response = self.call_deepseek_api(prompt, stream=False)
+            import json
+            # 清理响应，只保留JSON部分
+            json_start = response.find('{')
+            json_end = response.rfind('}') + 1
+            if json_start >= 0 and json_end > json_start:
+                json_str = response[json_start:json_end]
+                result = json.loads(json_str)
+                # 如果结果为空，使用规则式方法
+                total_entities = sum(len(v) for v in result.values())
+                if total_entities == 0:
+                    print("大模型返回空结果，使用规则式实体抽取")
+                    return self._extract_entities_simple(text_content)
+                return result
+            # 如果无法解析JSON，使用规则式方法
+            print("无法解析JSON响应，使用规则式实体抽取")
+            return self._extract_entities_simple(text_content)
+        except Exception as e:
+            print(f"大模型实体抽取失败：{str(e)}，使用规则式实体抽取")
+            return self._extract_entities_simple(text_content)
+
+    def _extract_entities_simple(self, text_content):
+        """
+        简单的规则式实体抽取（作为备用方案）
+        """
+        import re
+        from collections import defaultdict
+        
+        concepts = set()
+        technologies = set()
+        models = set()
+        documents = set()
+        
+        # 常见的技术关键词
+        tech_keywords = [
+            'Redis', 'MySQL', 'PostgreSQL', 'MongoDB', 'Elasticsearch',
+            'Spring', 'Spring Boot', 'Django', 'Flask', 'FastAPI',
+            'React', 'Vue', 'Angular', 'Node.js', 'Python', 'Java',
+            'JavaScript', 'TypeScript', 'Go', 'Rust', 'C++', 'C#',
+            'Docker', 'Kubernetes', 'Linux', 'Windows', 'Git', 'GitHub'
+        ]
+        
+        # 常见的模型关键词
+        model_keywords = [
+            'GPT', 'DeepSeek', 'BERT', 'GPT-3', 'GPT-4', 'Claude',
+            'LLaMA', 'Alpaca', 'Vicuna', 'ChatGLM', 'Qwen', 'Yi',
+            'Transformer', 'RAG', 'Embedding', 'BGE', 'M3E'
+        ]
+        
+        # 常见的概念关键词
+        concept_keywords = [
+            '向量数据库', '知识图谱', '大模型', '人工智能', '机器学习',
+            '深度学习', '自然语言处理', '计算机视觉', '强化学习',
+            '数据挖掘', '数据科学', '云计算', '大数据', '微服务'
+        ]
+        
+        # 从文本中匹配关键词
+        for kw in tech_keywords:
+            if kw in text_content:
+                technologies.add(kw)
+        
+        for kw in model_keywords:
+            if kw in text_content:
+                models.add(kw)
+        
+        for kw in concept_keywords:
+            if kw in text_content:
+                concepts.add(kw)
+        
+        # 简单的正则匹配：大写字母开头的词（长度>2）
+        words = re.findall(r'\b[A-Z][a-zA-Z0-9]{1,15}\b', text_content)
+        for word in words:
+            # 过滤掉一些常见的非技术词
+            if word not in ['The', 'This', 'That', 'These', 'Those', 'And', 'Or', 'But', 'For', 'With']:
+                if word not in concepts and word not in technologies and word not in models:
+                    # 根据单词特征分类
+                    if any(suffix in word.lower() for suffix in ['net', 'db', 'sql', 'js', 'py', 'server', 'client']):
+                        technologies.add(word)
+                    elif any(suffix in word.lower() for suffix in ['model', 'llm', 'gpt', 'bert', 'llama']):
+                        models.add(word)
+                    else:
+                        concepts.add(word)
+        
+        # 添加一些示例实体，确保至少有一些内容
+        if not concepts and not technologies and not models:
+            concepts.add('知识管理')
+            concepts.add('信息检索')
+            technologies.add('Python')
+            models.add('AI模型')
+        
+        return {
+            "concepts": list(concepts)[:10],
+            "technologies": list(technologies)[:10],
+            "models": list(models)[:10],
+            "documents": list(documents)[:5]
+        }
+
+    def _extract_relations(self, text_content, entities):
+        """
+        关系抽取：分析概念之间的关系
+        """
+        entity_list = []
+        for key in ['concepts', 'technologies', 'models', 'documents']:
+            entity_list.extend(entities.get(key, []))
+        
+        if not entity_list:
+            return []
+
+        prompt = f"""根据以下内容，分析概念之间的关系。
+
+【概念列表】
+{', '.join(entity_list)}
+
+【文本内容】
+{text_content}
+
+【关系类型】
+- 属于：A属于B
+- 依赖：A依赖B
+- 相关：A与B相关
+- 对比：A与B不同
+
+【输出要求】
+请以JSON数组格式输出关系三元组：
+[
+  ["实体1", "关系", "实体2"],
+  ["实体1", "关系", "实体2"]
+]
+
+请直接输出JSON，不要包含其他说明文字。"""
+
+        try:
+            response = self.call_deepseek_api(prompt, stream=False)
+            import json
+            # 清理响应，只保留JSON部分
+            json_start = response.find('[')
+            json_end = response.rfind(']') + 1
+            if json_start >= 0 and json_end > json_start:
+                json_str = response[json_start:json_end]
+                result = json.loads(json_str)
+                # 如果结果为空，使用规则式方法
+                if len(result) == 0:
+                    print("大模型返回空关系，使用规则式关系抽取")
+                    return self._extract_relations_simple(text_content, entities)
+                return result
+            # 如果无法解析JSON，使用规则式方法
+            print("无法解析JSON响应，使用规则式关系抽取")
+            return self._extract_relations_simple(text_content, entities)
+        except Exception as e:
+            print(f"大模型关系抽取失败：{str(e)}，使用规则式关系抽取")
+            return self._extract_relations_simple(text_content, entities)
+
+    def _extract_relations_simple(self, text_content, entities):
+        """
+        简单的规则式关系抽取（作为备用方案）
+        """
+        relations = []
+        
+        # 收集所有实体
+        entity_list = []
+        for key in ['concepts', 'technologies', 'models', 'documents']:
+            entity_list.extend(entities.get(key, []))
+        
+        if len(entity_list) < 2:
+            return relations
+        
+        # 创建一些默认的关系
+        # 将所有实体都与第一个实体建立"相关"关系
+        first_entity = entity_list[0]
+        for entity in entity_list[1:]:
+            relations.append([first_entity, "相关", entity])
+        
+        # 如果有模型和技术，添加"依赖"关系
+        models_list = entities.get('models', [])
+        tech_list = entities.get('technologies', [])
+        
+        if models_list and tech_list:
+            for model in models_list[:2]:
+                for tech in tech_list[:2]:
+                    relations.append([model, "依赖", tech])
+        
+        # 如果有概念和模型，添加"属于"关系
+        concepts_list = entities.get('concepts', [])
+        if concepts_list and models_list:
+            for concept in concepts_list[:2]:
+                for model in models_list[:2]:
+                    relations.append([model, "属于", concept])
+        
+        # 去重
+        unique_relations = []
+        seen = set()
+        for rel in relations:
+            key = tuple(rel)
+            if key not in seen and len(rel) == 3:
+                seen.add(key)
+                unique_relations.append(rel)
+        
+        return unique_relations[:15]  # 最多返回15条关系
+
+    def _build_knowledge_graph(self, knowledge_id, entities, relations):
+        """
+        构建知识图谱并保存到数据库
+        """
+        from database import SessionLocal, KnowledgeGraphNode, KnowledgeGraphEdge
+        db = SessionLocal()
+        
+        try:
+            # 删除旧的图谱数据
+            db.query(KnowledgeGraphNode).filter(KnowledgeGraphNode.knowledge_id == knowledge_id).delete()
+            db.query(KnowledgeGraphEdge).filter(KnowledgeGraphEdge.knowledge_id == knowledge_id).delete()
+            
+            nodes = []
+            node_map = {}
+            
+            # 创建节点
+            node_types = {
+                'concepts': 'concept',
+                'technologies': 'technology',
+                'models': 'model',
+                'documents': 'document'
+            }
+            
+            for key, node_type in node_types.items():
+                for name in entities.get(key, []):
+                    node_id = f"{node_type}_{name}"
+                    if node_id not in node_map:
+                        node = KnowledgeGraphNode(
+                            knowledge_id=knowledge_id,
+                            node_id=node_id,
+                            node_type=node_type,
+                            node_name=name,
+                            description=f"{node_type}节点：{name}"
+                        )
+                        db.add(node)
+                        nodes.append(node)
+                        node_map[node_id] = node
+                        node_map[name.lower()] = node
+                        node_map[name] = node
+            
+            db.flush()
+            
+            # 创建关系
+            for relation in relations:
+                if len(relation) == 3:
+                    source_name, rel_type, target_name = relation
+                    
+                    source_node = node_map.get(source_name) or node_map.get(source_name.lower())
+                    target_node = node_map.get(target_name) or node_map.get(target_name.lower())
+                    
+                    if source_node and target_node:
+                        edge = KnowledgeGraphEdge(
+                            knowledge_id=knowledge_id,
+                            source_node_id=source_node.node_id,
+                            target_node_id=target_node.node_id,
+                            relation_type=rel_type,
+                            description=f"{source_node.node_name} {rel_type} {target_node.node_name}"
+                        )
+                        db.add(edge)
+            
+            db.commit()
+            
+            # 返回图谱数据
+            saved_nodes = db.query(KnowledgeGraphNode).filter(KnowledgeGraphNode.knowledge_id == knowledge_id).all()
+            saved_edges = db.query(KnowledgeGraphEdge).filter(KnowledgeGraphEdge.knowledge_id == knowledge_id).all()
+            
+            return {
+                "nodes": [node.to_dict() for node in saved_nodes],
+                "edges": [edge.to_dict() for edge in saved_edges]
+            }
+        except Exception as e:
+            db.rollback()
+            print(f"构建图谱失败：{str(e)}")
+            return None
+        finally:
+            db.close()
+
+    def build_knowledge_graph(self, knowledge_id, user_id=None):
+        """
+        以知识源为节点的知识图谱构建流程
+        """
+        from database import SessionLocal, KnowledgeItem, KnowledgeChunk
+        import json
+        
+        db = SessionLocal()
+        try:
+            # 获取知识空间的所有文档
+            items = db.query(KnowledgeItem).filter(KnowledgeItem.knowledge_id == knowledge_id).all()
+            
+            print(f"找到 {len(items)} 个知识源")
+            
+            if not items:
+                return {
+                    "success": False,
+                    "error": "当前知识空间没有文档"
+                }
+            
+            # 为每个知识源收集完整内容
+            knowledge_sources = []
+            for item in items:
+                # 收集内容
+                content_parts = []
+                if item.content:
+                    content_parts.append(item.content)
+                
+                # 收集chunks
+                chunks = db.query(KnowledgeChunk).filter(
+                    KnowledgeChunk.knowledge_id == knowledge_id,
+                    KnowledgeChunk.data_id == item.id
+                ).all()
+                
+                for chunk in chunks:
+                    if chunk.chunk_text:
+                        content_parts.append(chunk.chunk_text)
+                
+                full_content = "\n".join(content_parts)
+                
+                # 为每个知识源生成主题总结
+                summary = self._generate_knowledge_summary(full_content, item.title)
+                
+                knowledge_sources.append({
+                    "id": str(item.id),
+                    "title": item.title or item.file_name or f"文档{item.id}",
+                    "content": full_content[:5000],  # 限制内容长度
+                    "summary": summary,
+                    "source_type": item.source_type or "document"
+                })
+                
+                print(f"处理知识源 {item.id}: {item.title}")
+            
+            # 保存图谱数据
+            graph_data = self._build_source_based_graph(knowledge_id, knowledge_sources)
+            
+            if graph_data:
+                return {
+                    "success": True,
+                    "graph": graph_data
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "图谱构建失败"
+                }
+        except Exception as e:
+            import traceback
+            print(f"知识图谱构建异常：{str(e)}")
+            print(traceback.format_exc())
+            return {
+                "success": False,
+                "error": f"知识图谱构建失败：{str(e)}"
+            }
+        finally:
+            db.close()
+
+    def _generate_knowledge_summary(self, content, title):
+        """
+        为知识源生成主题总结
+        """
+        if not content or len(content.strip()) < 50:
+            return "暂无内容"
+        
+        # 使用简单的规则式总结
+        sentences = content.split('。')[:3]  # 取前3个句子
+        summary = '。'.join(sentences) + '。'
+        
+        # 提取关键词
+        keywords = []
+        common_keywords = ['的', '了', '在', '是', '有', '和', '与', '对', '为', '等', '这', '那']
+        
+        # 简单的词频统计
+        words = content.split()
+        word_count = {}
+        for word in words:
+            if len(word) > 1 and word not in common_keywords:
+                word_count[word] = word_count.get(word, 0) + 1
+        
+        # 取前5个关键词
+        sorted_keywords = sorted(word_count.items(), key=lambda x: x[1], reverse=True)[:5]
+        keywords = [k for k, v in sorted_keywords]
+        
+        if keywords:
+            summary = f"主要知识点：{', '.join(keywords)}\n{summary}"
+        
+        return summary[:300]
+
+    def _calculate_content_similarity(self, content1, content2):
+        """
+        简单计算两个内容的相似性（基于词袋模型）
+        """
+        if not content1 or not content2:
+            return 0
+        
+        # 分词
+        words1 = set(content1.split())
+        words2 = set(content2.split())
+        
+        if not words1 or not words2:
+            return 0
+        
+        # 计算Jaccard相似度
+        intersection = len(words1 & words2)
+        union = len(words1 | words2)
+        
+        if union == 0:
+            return 0
+        
+        return intersection / union
+
+    def _build_source_based_graph(self, knowledge_id, knowledge_sources):
+        """
+        构建以知识源为节点的图谱
+        """
+        from database import SessionLocal, KnowledgeGraphNode, KnowledgeGraphEdge
+        import json
+        
+        db = SessionLocal()
+        
+        try:
+            # 删除旧的图谱数据
+            db.query(KnowledgeGraphNode).filter(KnowledgeGraphNode.knowledge_id == knowledge_id).delete()
+            db.query(KnowledgeGraphEdge).filter(KnowledgeGraphEdge.knowledge_id == knowledge_id).delete()
+            
+            nodes = []
+            node_map = {}
+            
+            # 创建知识源节点
+            for source in knowledge_sources:
+                node_id = f"source_{source['id']}"
+                node = KnowledgeGraphNode(
+                    knowledge_id=knowledge_id,
+                    node_id=node_id,
+                    node_type="source",
+                    node_name=source["title"],
+                    description=source["summary"],
+                    extra_data=json.dumps({
+                        "source_id": source["id"],
+                        "source_type": source["source_type"],
+                        "content_preview": source["content"][:200]
+                    }, ensure_ascii=False)
+                )
+                db.add(node)
+                nodes.append(node)
+                node_map[node_id] = node
+                
+                print(f"创建节点: {source['title']}")
+            
+            db.flush()
+            
+            # 计算节点间的相似性并创建连线
+            edges = []
+            similarity_threshold = 0.05  # 相似度阈值
+            
+            for i, source1 in enumerate(knowledge_sources):
+                for j, source2 in enumerate(knowledge_sources):
+                    if i >= j:
+                        continue  # 避免重复
+                    
+                    similarity = self._calculate_content_similarity(
+                        source1["content"], 
+                        source2["content"]
+                    )
+                    
+                    if similarity > similarity_threshold:
+                        node_id1 = f"source_{source1['id']}"
+                        node_id2 = f"source_{source2['id']}"
+                        
+                        # 根据相似度确定关系类型
+                        if similarity > 0.3:
+                            rel_type = "高度相关"
+                        elif similarity > 0.15:
+                            rel_type = "相关"
+                        else:
+                            rel_type = "弱相关"
+                        
+                        edge = KnowledgeGraphEdge(
+                            knowledge_id=knowledge_id,
+                            source_node_id=node_id1,
+                            target_node_id=node_id2,
+                            relation_type=rel_type,
+                            description=f"内容相似度: {similarity:.2f}",
+                            extra_data=json.dumps({
+                                "similarity": similarity
+                            }, ensure_ascii=False)
+                        )
+                        db.add(edge)
+                        edges.append(edge)
+                        
+                        print(f"创建连线: {source1['title']} <-> {source2['title']}, 相似度: {similarity:.2f}")
+            
+            db.commit()
+            
+            # 返回图谱数据
+            saved_nodes = db.query(KnowledgeGraphNode).filter(KnowledgeGraphNode.knowledge_id == knowledge_id).all()
+            saved_edges = db.query(KnowledgeGraphEdge).filter(KnowledgeGraphEdge.knowledge_id == knowledge_id).all()
+            
+            return {
+                "nodes": [node.to_dict() for node in saved_nodes],
+                "edges": [edge.to_dict() for edge in saved_edges]
+            }
+        except Exception as e:
+            db.rollback()
+            print(f"构建图谱失败：{str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+        finally:
+            db.close()
+
+    def get_knowledge_graph(self, knowledge_id):
+        """
+        获取已构建的知识图谱
+        """
+        from database import SessionLocal, KnowledgeGraphNode, KnowledgeGraphEdge
+        
+        db = SessionLocal()
+        try:
+            nodes = db.query(KnowledgeGraphNode).filter(KnowledgeGraphNode.knowledge_id == knowledge_id).all()
+            edges = db.query(KnowledgeGraphEdge).filter(KnowledgeGraphEdge.knowledge_id == knowledge_id).all()
+            
+            return {
+                "success": True,
+                "nodes": [node.to_dict() for node in nodes],
+                "edges": [edge.to_dict() for edge in edges]
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"获取图谱失败：{str(e)}"
+            }
+        finally:
+            db.close()
+
+    def _build_trace_context(self, documents, metadatas):
+        """
+        构建知识溯源的上下文，为每个chunk添加来源标签
+        """
+        from database import SessionLocal, KnowledgeItem
+        
+        db = SessionLocal()
+        context_parts = []
+        sources = []
+        
+        try:
+            for i, (doc, meta) in enumerate(zip(documents, metadatas)):
+                item_id = meta.get('item_id')
+                doc_name = "未知文档"
+                
+                if item_id:
+                    try:
+                        item = db.query(KnowledgeItem).filter(KnowledgeItem.id == item_id).first()
+                        if item:
+                            doc_name = item.title or item.file_name or f"文档{item_id}"
+                    except:
+                        pass
+                
+                # 构建带有来源标签的上下文
+                context_parts.append(f"[来源: {doc_name}]")
+                context_parts.append(doc)
+                context_parts.append("")
+                
+                # 同时收集来源信息
+                sources.append({
+                    "doc_name": doc_name,
+                    "chunk_id": meta.get('chunk_id', f'chunk_{i}'),
+                    "content": doc,
+                    "score": meta.get('score', 0)
+                })
+        finally:
+            db.close()
+        
+        return "\n".join(context_parts), sources
+
+    def _build_trace_prompt(self, user_query, context):
+        """
+        构建知识溯源的Prompt，要求模型在回答中标注来源
+        """
+        prompt = f"""你是一名严谨的知识助手，请基于提供的参考内容回答问题。
+
+【问题】
+{user_query}
+
+【参考内容】
+{context or '当前没有找到相关的参考内容。'}
+
+【要求】
+1. 所有结论必须来自参考内容，不允许编造
+2. 在回答中标注来源，例如：[来源: 文档名]
+3. 如果多个来源支持同一结论，可以合并引用
+4. 若资料不足，请说明“未找到相关信息”
+5. 使用Markdown格式，结构清晰
+
+【输出格式】
+回答内容（带来源标注）
+"""
+        return prompt
+
+    def knowledge_trace(self, user_query, top_k=5, knowledge_id=None, knowledge_ids=None, user_id=None):
+        """
+        知识溯源完整流程
+        """
+        try:
+            # 1. 向量检索
+            documents, metadatas = self._search_documents(
+                user_query,
+                top_k=top_k,
+                knowledge_id=knowledge_id,
+                knowledge_ids=knowledge_ids
+            )
+            
+            if not documents:
+                return {
+                    "success": True,
+                    "answer": "未找到相关信息，请尝试其他问题",
+                    "sources": []
+                }
+            
+            # 2. 构建溯源上下文
+            context, sources = self._build_trace_context(documents, metadatas)
+            
+            # 3. 构建Prompt并调用大模型
+            prompt = self._build_trace_prompt(user_query, context)
+            answer = self.call_deepseek_api(prompt, stream=False, user_id=user_id)
+            
+            # 4. 整理返回结果
+            return {
+                "success": True,
+                "answer": answer,
+                "sources": sources
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"知识溯源失败：{str(e)}",
+                "answer": "",
+                "sources": []
+            }

@@ -1,4 +1,4 @@
-﻿from flask import Flask, send_from_directory, request, jsonify, Response, stream_with_context
+from flask import Flask, send_from_directory, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 import os
 import uuid
@@ -16,6 +16,7 @@ from sqlalchemy import func, distinct, cast, Date, text
 from datetime import datetime, date, timedelta
 from html.parser import HTMLParser
 from urllib.parse import urlparse
+from PIL import Image, ImageFilter
 from database import SessionLocal, AppUser, KnowledgeBase, KnowledgeData, KnowledgeChunk, KnowledgeItem, KnowledgeDocument, KnowledgeDatasource, KnowledgeTableSchema, LearningQuickNote, LearningWebBookmark, LearningDatabaseNote, ChatSession, ChatMessage, init_db
 
 from services.document_service import DocumentService
@@ -70,6 +71,7 @@ PUBLIC_API_PATHS = {
 }
 PUBLIC_API_PREFIXES = (
     '/api/media/covers/',
+    '/api/media/uploads/',
 )
 
 
@@ -214,6 +216,7 @@ def require_api_auth():
     try:
         ensure_user_scoped_schema(db)
         ensure_learning_database_note_schema(db)
+        ensure_knowledge_base_extended_schema(db)
         claim_orphan_records(db, user.id)
     finally:
         db.close()
@@ -302,7 +305,7 @@ def parse_kb_tags(raw_value):
 
 
 def build_kb_payload(data):
-    return {
+    payload = {
         'name': str(data.get('name', '')).strip(),
         'description': str(data.get('description', '')).strip(),
         'embedding_model': str(data.get('embedding_model', 'bge-large')).strip() or 'bge-large',
@@ -313,6 +316,21 @@ def build_kb_payload(data):
         'retrieval_mode': str(data.get('retrieval_mode', 'hybrid')).strip() or 'hybrid',
         'chunk_strategy': str(data.get('chunk_strategy', 'paragraph-balanced')).strip() or 'paragraph-balanced'
     }
+    
+    # 新增字段
+    if 'persona' in data:
+        payload['persona'] = str(data.get('persona', '')).strip()
+    if 'thinking_style' in data:
+        payload['thinking_style'] = str(data.get('thinking_style', 'teaching')).strip() or 'teaching'
+    if 'task_policy' in data:
+        task_policy = data.get('task_policy', [])
+        if isinstance(task_policy, str):
+            task_policy = [s.strip() for s in task_policy.split(',') if s.strip()]
+        payload['task_policy'] = json.dumps(task_policy, ensure_ascii=False)
+    if 'model_strategy' in data:
+        payload['model_strategy'] = str(data.get('model_strategy', '')).strip()
+    
+    return payload
 
 
 def ensure_learning_database_note_schema(db):
@@ -354,6 +372,37 @@ def ensure_user_scoped_schema(db):
                 db.execute(text(f"ALTER TABLE {table_name} {alter_sql}"))
 
     db.commit()
+
+
+def ensure_knowledge_base_extended_schema(db):
+    """确保knowledge_base表包含扩展字段（persona, thinking_style, task_policy, model_strategy）"""
+    column_rows = db.execute(text("SHOW COLUMNS FROM knowledge_base")).fetchall()
+    existing_columns = {row[0] for row in column_rows}
+    alter_statements = []
+
+    # 确定新增字段应该添加的位置，在chunk_strategy之后
+    last_column = 'chunk_strategy'
+
+    if 'persona' not in existing_columns:
+        alter_statements.append(f"ADD COLUMN persona LONGTEXT NULL COMMENT '角色设定/背景设定' AFTER {last_column}")
+        last_column = 'persona'
+
+    if 'thinking_style' not in existing_columns:
+        alter_statements.append(f"ADD COLUMN thinking_style VARCHAR(50) NOT NULL DEFAULT 'teaching' COMMENT '思考方式（teaching/interview/summary/reasoning）' AFTER {last_column}")
+        last_column = 'thinking_style'
+
+    if 'task_policy' not in existing_columns:
+        alter_statements.append(f"ADD COLUMN task_policy JSON NULL COMMENT '任务策略（JSON数组）' AFTER {last_column}")
+        last_column = 'task_policy'
+
+    if 'model_strategy' not in existing_columns:
+        alter_statements.append(f"ADD COLUMN model_strategy VARCHAR(255) NULL COMMENT '模型策略' AFTER {last_column}")
+
+    for statement in alter_statements:
+        db.execute(text(f"ALTER TABLE knowledge_base {statement}"))
+
+    if alter_statements:
+        db.commit()
 
 
 def claim_orphan_records(db, user_id):
@@ -463,6 +512,189 @@ def login_user():
 @app.route('/api/auth/me', methods=['GET'])
 def get_current_user_profile():
     return jsonify(request.current_user.to_dict())
+
+
+@app.route('/api/user/update', methods=['POST'])
+def update_user_info():
+    data = request.get_json() or {}
+    username = str(data.get('username', '')).strip()
+    nickname = str(data.get('nickname', '')).strip()
+    email = str(data.get('email', '')).strip()
+    
+    if not username:
+        return jsonify({'error': '用户名不能为空'}), 400
+    
+    db = get_db_session()
+    try:
+        user_id = current_user_id()
+        user = db.query(AppUser).filter(AppUser.id == user_id).first()
+        if not user:
+            return jsonify({'error': '用户不存在'}), 404
+        
+        # 更新用户信息
+        user.username = username
+        user.nickname = nickname
+        user.email = email
+        
+        db.commit()
+        return jsonify({
+            'message': '账号信息修改成功',
+            'user': user.to_dict()
+        })
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+@app.route('/api/user/set-theme', methods=['POST'])
+def set_user_theme():
+    data = request.get_json() or {}
+    theme = str(data.get('theme', '')).strip()
+    
+    if not theme:
+        return jsonify({'error': '主题不能为空'}), 400
+    
+    db = get_db_session()
+    try:
+        user_id = current_user_id()
+        user = db.query(AppUser).filter(AppUser.id == user_id).first()
+        if not user:
+            return jsonify({'error': '用户不存在'}), 404
+        
+        # 更新主题
+        user.theme = theme
+        
+        db.commit()
+        return jsonify({'message': '主题设置成功'})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+@app.route('/api/user/set-language', methods=['POST'])
+def set_user_language():
+    data = request.get_json() or {}
+    language = str(data.get('language', '')).strip()
+    
+    if not language:
+        return jsonify({'error': '语言不能为空'}), 400
+    
+    db = get_db_session()
+    try:
+        user_id = current_user_id()
+        user = db.query(AppUser).filter(AppUser.id == user_id).first()
+        if not user:
+            return jsonify({'error': '用户不存在'}), 404
+        
+        # 更新语言
+        user.language = language
+        
+        db.commit()
+        return jsonify({'message': '语言切换成功'})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+@app.route('/api/user/password', methods=['PUT'])
+def change_user_password():
+    data = request.get_json() or {}
+    old_password = str(data.get('oldPassword', '')).strip()
+    new_password = str(data.get('newPassword', '')).strip()
+    
+    if not old_password:
+        return jsonify({'error': '旧密码不能为空'}), 400
+    if not new_password:
+        return jsonify({'error': '新密码不能为空'}), 400
+    if len(new_password) < 6:
+        return jsonify({'error': '新密码至少需要 6 个字符'}), 400
+    
+    db = get_db_session()
+    try:
+        user_id = current_user_id()
+        user = db.query(AppUser).filter(AppUser.id == user_id).first()
+        if not user:
+            return jsonify({'error': '用户不存在'}), 404
+        
+        # 验证旧密码
+        if not check_password_hash(user.password_hash, old_password):
+            return jsonify({'error': '旧密码错误'}), 401
+        
+        # 更新密码
+        user.password_hash = generate_password_hash(new_password)
+        
+        db.commit()
+        return jsonify({'message': '密码修改成功'})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+@app.route('/api/user/account', methods=['DELETE'])
+def delete_user_account():
+    db = get_db_session()
+    try:
+        user_id = current_user_id()
+        user = db.query(AppUser).filter(AppUser.id == user_id).first()
+        if not user:
+            return jsonify({'error': '用户不存在'}), 404
+        
+        # 获取用户的所有知识空间
+        knowledge_bases = db.query(KnowledgeBase).filter(KnowledgeBase.user_id == user_id).all()
+        knowledge_ids = [kb.id for kb in knowledge_bases]
+        
+        if knowledge_ids:
+            # 删除知识空间相关的所有数据
+            # 1. 删除聊天消息
+            chat_sessions = db.query(ChatSession).filter(ChatSession.knowledge_id.in_(knowledge_ids)).all()
+            session_ids = [cs.id for cs in chat_sessions]
+            if session_ids:
+                db.query(ChatMessage).filter(ChatMessage.session_id.in_(session_ids)).delete(synchronize_session=False)
+                db.query(ChatSession).filter(ChatSession.id.in_(session_ids)).delete(synchronize_session=False)
+            
+            # 2. 删除快速笔记
+            db.query(LearningQuickNote).filter(LearningQuickNote.knowledge_id.in_(knowledge_ids)).delete(synchronize_session=False)
+            
+            # 3. 删除网页书签
+            db.query(LearningWebBookmark).filter(LearningWebBookmark.user_id == user_id).delete(synchronize_session=False)
+            
+            # 4. 删除数据库笔记
+            db.query(LearningDatabaseNote).filter(LearningDatabaseNote.user_id == user_id).delete(synchronize_session=False)
+            
+            # 5. 删除数据源相关
+            datasources = db.query(KnowledgeDatasource).filter(KnowledgeDatasource.knowledge_id.in_(knowledge_ids)).all()
+            datasource_ids = [ds.id for ds in datasources]
+            if datasource_ids:
+                db.query(KnowledgeTableSchema).filter(KnowledgeTableSchema.datasource_id.in_(datasource_ids)).delete(synchronize_session=False)
+                db.query(KnowledgeDatasource).filter(KnowledgeDatasource.id.in_(datasource_ids)).delete(synchronize_session=False)
+            
+            # 6. 删除知识块、知识数据、知识项、知识文档
+            db.query(KnowledgeChunk).filter(KnowledgeChunk.knowledge_id.in_(knowledge_ids)).delete(synchronize_session=False)
+            db.query(KnowledgeData).filter(KnowledgeData.knowledge_id.in_(knowledge_ids)).delete(synchronize_session=False)
+            db.query(KnowledgeItem).filter(KnowledgeItem.knowledge_id.in_(knowledge_ids)).delete(synchronize_session=False)
+            db.query(KnowledgeDocument).filter(KnowledgeDocument.knowledge_id.in_(knowledge_ids)).delete(synchronize_session=False)
+            
+            # 7. 删除知识空间
+            db.query(KnowledgeBase).filter(KnowledgeBase.user_id == user_id).delete(synchronize_session=False)
+        
+        # 最后删除用户
+        db.query(AppUser).filter(AppUser.id == user_id).delete(synchronize_session=False)
+        
+        db.commit()
+        return jsonify({'message': '账号已成功注销'})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
 
 
 def create_manual_material(db, knowledge_id, title, content, tags=None, is_favorite=False, is_pinned=False):
@@ -713,6 +945,11 @@ def serve_static(path):
 @app.route('/api/media/covers/<path:filename>')
 def serve_cover_file(filename):
     return send_from_directory(app.config['COVER_FOLDER'], filename)
+
+
+@app.route('/api/media/uploads/<path:filename>')
+def serve_upload_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 
 @app.route('/api/knowledge/cover/upload', methods=['POST'])
@@ -1669,6 +1906,253 @@ def test_datasource_connection():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/text/upload', methods=['POST'])
+def upload_text():
+    data = request.get_json()
+    knowledge_id = data.get('knowledgeId')
+    title = data.get('title')
+    content = data.get('content')
+    
+    if not knowledge_id or not title or not content:
+        return jsonify({'error': 'knowledgeId, title and content are required'}), 400
+        
+    db = get_db_session()
+    try:
+        if not get_owned_knowledge_base(db, knowledge_id):
+            return jsonify({'error': 'Knowledge base not found'}), 404
+
+        # 保存到知识库
+        new_item = KnowledgeItem(
+            knowledge_id=knowledge_id,
+            title=title,
+            source_type='text',
+            content=content,
+            status='finished'
+        )
+        db.add(new_item)
+        db.commit()
+        
+        # 存入向量库
+        chunks = [content]
+        doc_ids = [str(uuid.uuid4())]
+        metadatas = [{
+            'knowledge_id': str(knowledge_id),
+            'item_id': str(new_item.id),
+            'source': 'text',
+            'title': new_item.title,
+            'chunk': 0
+        }]
+        vector_service.add_documents(chunks, ids=doc_ids, metadatas=metadatas)
+        
+        return jsonify({'message': '文本上传成功', 'id': new_item.id})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+@app.route('/api/web/parse', methods=['POST'])
+def parse_webpage():
+    data = request.get_json()
+    knowledge_id = data.get('knowledgeId')
+    url = data.get('url')
+    title = data.get('title')
+    
+    if not knowledge_id or not url:
+        return jsonify({'error': 'knowledgeId and url are required'}), 400
+        
+    db = get_db_session()
+    try:
+        if not get_owned_knowledge_base(db, knowledge_id):
+            return jsonify({'error': 'Knowledge base not found'}), 404
+
+        # 1. 爬取网页内容
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        
+        # 2. 解析HTML
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # 提取标题
+        if not title:
+            title = soup.title.string.strip() if soup.title else f"Webpage: {url}"
+        
+        # 提取正文内容
+        # 尝试各种常见的正文选择器
+        selectors = [
+            'article',
+            '.article-content',
+            '.post-content',
+            '.entry-content',
+            '.main-content',
+            '#content',
+            'div.content'
+        ]
+        
+        content = ""
+        for selector in selectors:
+            elements = soup.select(selector)
+            if elements:
+                content = '\n'.join([elem.get_text(strip=True) for elem in elements])
+                break
+        
+        # 如果没有找到合适的选择器，提取所有段落
+        if not content:
+            paragraphs = soup.find_all('p')
+            content = '\n'.join([p.get_text(strip=True) for p in paragraphs])
+        
+        if not content:
+            content = soup.get_text(strip=True)
+        
+        # 3. 调用AI总结内容
+        summary_prompt = f"请总结以下网页内容，保证主题和主要内容的完整性：\n\n{content[:5000]}"
+        
+        # 使用当前模型生成总结
+        summary = rag_service.call_deepseek_api(
+            summary_prompt,
+            stream=False,
+            user_id=current_user_id()
+        )
+        
+        # 4. 保存到知识库
+        new_item = KnowledgeItem(
+            knowledge_id=knowledge_id,
+            title=title,
+            source_type='web_page',
+            content=summary,
+            datasource_config={
+                'url': url,
+                'type': 'web'
+            },
+            status='finished'
+        )
+        db.add(new_item)
+        db.commit()
+        
+        # 5. 存入向量库
+        chunks = [summary]
+        doc_ids = [str(uuid.uuid4())]
+        metadatas = [{
+            'knowledge_id': str(knowledge_id),
+            'item_id': str(new_item.id),
+            'source': 'web_page',
+            'title': new_item.title,
+            'chunk': 0
+        }]
+        vector_service.add_documents(chunks, ids=doc_ids, metadatas=metadatas)
+        
+        return jsonify({'message': '网页解析成功', 'id': new_item.id})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+@app.route('/api/code/upload', methods=['POST'])
+def upload_code():
+    try:
+        knowledge_id = None
+        code_language = 'text'
+        code_content = None
+        title = None
+
+        # 检查是文件上传还是JSON数据
+        if request.content_type and 'multipart/form-data' in request.content_type:
+            # 文件上传模式
+            if 'file' not in request.files:
+                return jsonify({'error': 'No file part'}), 400
+
+            file = request.files['file']
+            if not file or file.filename == '':
+                return jsonify({'error': 'No selected file'}), 400
+
+            knowledge_id = request.form.get('knowledgeId')
+            code_language = request.form.get('codeLanguage', 'text')
+            if not knowledge_id:
+                return jsonify({'error': 'knowledgeId is required'}), 400
+
+            # 读取代码内容
+            code_content = file.read().decode('utf-8')
+            title = file.filename
+        else:
+            # 手动粘贴模式
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'Invalid JSON data'}), 400
+
+            knowledge_id = data.get('knowledgeId')
+            code_language = data.get('codeLanguage', 'text')
+            code_content = data.get('codeContent', '')
+            title = data.get('codeTitle', '未命名代码')
+
+            if not knowledge_id:
+                return jsonify({'error': 'knowledgeId is required'}), 400
+
+        if not code_content.strip():
+            return jsonify({'error': 'Code content is empty'}), 400
+
+        db = get_db_session()
+        try:
+            if not get_owned_knowledge_base(db, knowledge_id):
+                return jsonify({'error': 'Knowledge base not found'}), 404
+
+            # 1. 调用AI分析代码
+            analysis_prompt = f"请分析以下{code_language}代码，包括功能、结构、关键逻辑和潜在问题：\n\n{code_content[:8000]}"
+            analysis_result = rag_service.call_deepseek_api(
+                analysis_prompt,
+                stream=False,
+                user_id=current_user_id()
+            )
+
+            # 2. 总结分析结果
+            summary_prompt = f"请总结以下{code_language}代码分析结果，提取核心功能和关键信息：\n\n{analysis_result}"
+            summary = rag_service.call_deepseek_api(
+                summary_prompt,
+                stream=False,
+                user_id=current_user_id()
+            )
+
+            # 3. 保存到知识库
+            new_item = KnowledgeItem(
+                knowledge_id=knowledge_id,
+                title=title,
+                source_type='code',
+                content=summary,
+                file_name=title,
+                datasource_config={
+                    'language': code_language,
+                    'type': 'code',
+                    'raw_content': code_content[:2000]  # 保存部分原始内容用于预览
+                },
+                status='finished'
+            )
+            db.add(new_item)
+            db.commit()
+            db.refresh(new_item)
+
+            # 4. 存入向量库
+            chunks = [summary]
+            doc_ids = [str(uuid.uuid4())]
+            metadatas = [{
+                'knowledge_id': str(knowledge_id),
+                'item_id': str(new_item.id),
+                'source': 'code',
+                'title': new_item.title,
+                'language': code_language,
+                'chunk': 0
+            }]
+            vector_service.add_documents(chunks, ids=doc_ids, metadatas=metadatas)
+
+            return jsonify({'message': '代码上传并分析成功', 'id': new_item.id, 'analysis': summary})
+        except Exception as e:
+            db.rollback()
+            return jsonify({'error': str(e)}), 500
+        finally:
+            db.close()
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/datasource/add', methods=['POST'])
 def add_datasource():
     data = request.get_json()
@@ -2229,6 +2713,64 @@ def manage_models():
                 return jsonify({'error': 'model_id is required'}), 400
             return jsonify(model_service.delete_custom_model(model_id))
 
+        if action == 'update_status':
+            model_id = data.get('model_id')
+            enabled = data.get('enabled', True)
+            if not model_id:
+                return jsonify({'error': 'model_id is required'}), 400
+            return jsonify(model_service.update_model_status(model_id, enabled))
+
+        if action == 'update_tags':
+            model_id = data.get('model_id')
+            tags = data.get('tags', [])
+            if not model_id:
+                return jsonify({'error': 'model_id is required'}), 400
+            return jsonify(model_service.update_model_tags(model_id, tags))
+
+        if action == 'update_type':
+            model_id = data.get('model_id')
+            model_type = data.get('type', 'cloud')
+            if not model_id:
+                return jsonify({'error': 'model_id is required'}), 400
+            return jsonify(model_service.update_model_type(model_id, model_type))
+
+        return jsonify({'error': 'Unsupported action'}), 400
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# 5.5 任务分配接口
+@app.route('/api/models/tasks', methods=['GET', 'POST'])
+def manage_task_assignments():
+    try:
+        model_service = get_user_model_config_service(current_user_id())
+        if request.method == 'GET':
+            return jsonify(model_service.get_task_assignments())
+
+        data = request.get_json() or {}
+        action = data.get('action', 'update_task')
+
+        if action == 'update_task':
+            task_type = data.get('task_type')
+            model_id = data.get('model_id')
+            if not task_type or not model_id:
+                return jsonify({'error': 'task_type and model_id are required'}), 400
+            return jsonify(model_service.update_task_assignment(task_type, model_id))
+
+        if action == 'update_strategy':
+            strategy = data.get('strategy')
+            if not strategy:
+                return jsonify({'error': 'strategy is required'}), 400
+            return jsonify(model_service.update_scheduling_strategy(strategy))
+
+        if action == 'update_fallback':
+            model_id = data.get('model_id')
+            fallback_ids = data.get('fallback_ids', [])
+            if not model_id:
+                return jsonify({'error': 'model_id is required'}), 400
+            return jsonify(model_service.update_fallback_models(model_id, fallback_ids))
+
         return jsonify({'error': 'Unsupported action'}), 400
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -2246,6 +2788,150 @@ def manage_system_config():
         return jsonify(save_system_settings(data, user_id=current_user_id()))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# 多文档分析接口
+@app.route('/api/agent/multi-doc-analysis', methods=['POST'])
+def multi_doc_analysis():
+    try:
+        data = request.get_json() or {}
+        knowledge_id = data.get('knowledge_id')
+        doc_ids = data.get('doc_ids', [])
+        query = data.get('query', '')
+        model_id = data.get('model_id')
+        
+        if not knowledge_id:
+            return jsonify({'error': 'knowledge_id is required'}), 400
+        if not doc_ids or len(doc_ids) == 0:
+            return jsonify({'error': '请至少选择一个文档'}), 400
+        if not query.strip():
+            return jsonify({'error': '请输入分析要求'}), 400
+        
+        # 验证知识空间权限
+        db = get_db_session()
+        try:
+            knowledge_base = get_owned_knowledge_base(db, knowledge_id)
+            if not knowledge_base:
+                return jsonify({'error': '知识空间不存在或无权限访问'}), 404
+        finally:
+            db.close()
+        
+        # 如果指定了模型ID，临时更新模型配置
+        user_model_service = get_user_model_config_service(current_user_id())
+        if model_id:
+            user_model_service.activate_model(model_id)
+        
+        # 执行多文档分析
+        result = rag_service.multi_doc_analysis(
+            user_query=query,
+            doc_ids=doc_ids,
+            knowledge_id=knowledge_id,
+            user_id=current_user_id()
+        )
+        
+        if result.get('success'):
+            return jsonify(result)
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# 知识图谱构建接口
+@app.route('/api/agent/build-knowledge-graph', methods=['POST'])
+def build_knowledge_graph():
+    try:
+        data = request.get_json() or {}
+        knowledge_id = data.get('knowledge_id')
+        
+        if not knowledge_id:
+            return jsonify({'error': 'knowledge_id is required'}), 400
+        
+        # 验证知识空间权限
+        db = get_db_session()
+        try:
+            knowledge_base = get_owned_knowledge_base(db, knowledge_id)
+            if not knowledge_base:
+                return jsonify({'error': '知识空间不存在或无权限访问'}), 404
+        finally:
+            db.close()
+        
+        # 执行知识图谱构建
+        result = rag_service.build_knowledge_graph(knowledge_id, user_id=current_user_id())
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# 获取知识图谱接口
+@app.route('/api/agent/get-knowledge-graph', methods=['GET'])
+def get_knowledge_graph():
+    try:
+        knowledge_id = request.args.get('knowledge_id')
+        
+        if not knowledge_id:
+            return jsonify({'error': 'knowledge_id is required'}), 400
+        
+        # 验证知识空间权限
+        db = get_db_session()
+        try:
+            knowledge_base = get_owned_knowledge_base(db, knowledge_id)
+            if not knowledge_base:
+                return jsonify({'error': '知识空间不存在或无权限访问'}), 404
+        finally:
+            db.close()
+        
+        # 获取知识图谱
+        result = rag_service.get_knowledge_graph(knowledge_id)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# 知识溯源接口
+@app.route('/api/agent/knowledge-trace', methods=['POST'])
+def knowledge_trace():
+    try:
+        data = request.get_json() or {}
+        knowledge_id = data.get('knowledge_id')
+        query = data.get('query', '')
+        top_k = data.get('top_k', 5)
+        model_id = data.get('model_id')
+        
+        if not knowledge_id:
+            return jsonify({'error': 'knowledge_id is required'}), 400
+        if not query.strip():
+            return jsonify({'error': '请输入查询问题'}), 400
+        
+        # 验证知识空间权限
+        db = get_db_session()
+        try:
+            knowledge_base = get_owned_knowledge_base(db, knowledge_id)
+            if not knowledge_base:
+                return jsonify({'error': '知识空间不存在或无权限访问'}), 404
+        finally:
+            db.close()
+        
+        # 如果指定了模型ID，临时更新模型配置
+        user_model_service = get_user_model_config_service(current_user_id())
+        if model_id:
+            user_model_service.activate_model(model_id)
+        
+        # 执行知识溯源
+        result = rag_service.knowledge_trace(
+            user_query=query,
+            top_k=top_k,
+            knowledge_id=knowledge_id,
+            user_id=current_user_id()
+        )
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=8080, debug=True)

@@ -53,6 +53,12 @@ class KnowledgeBase(Base):
     category = Column(String(100), nullable=True)
     retrieval_mode = Column(String(50), default="hybrid")
     chunk_strategy = Column(String(100), default="paragraph-balanced")
+    # 新增字段
+    persona = Column(Text, nullable=True)  # 角色设定
+    thinking_style = Column(String(50), default="teaching")  # 思考方式
+    task_policy = Column(JSON, nullable=True)  # 任务策略
+    model_strategy = Column(String(100), nullable=True)  # 模型策略
+    background_url = Column(String(500), nullable=True)  # 背景图片URL
     create_time = Column(DateTime, default=datetime.now)
     update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -61,6 +67,10 @@ class KnowledgeBase(Base):
             tags = json.loads(self.tags) if self.tags else []
         except Exception:
             tags = [item.strip() for item in str(self.tags or "").split(",") if item.strip()]
+        try:
+            task_policy = json.loads(self.task_policy) if self.task_policy else []
+        except Exception:
+            task_policy = self.task_policy or []
         return {
             "id": self.id,
             "name": self.name,
@@ -72,6 +82,11 @@ class KnowledgeBase(Base):
             "category": self.category,
             "retrieval_mode": self.retrieval_mode,
             "chunk_strategy": self.chunk_strategy,
+            "persona": self.persona,
+            "thinking_style": self.thinking_style,
+            "task_policy": task_policy,
+            "model_strategy": self.model_strategy,
+            "background_url": self.background_url,
             "create_time": self.create_time.strftime("%Y-%m-%d %H:%M:%S") if self.create_time else None,
             "update_time": self.update_time.strftime("%Y-%m-%d %H:%M:%S") if self.update_time else None,
         }
@@ -329,6 +344,66 @@ class ChatMessage(Base):
             "role": self.role,
             "content": self.content,
             "message_type": self.message_type,
+            "create_time": self.create_time.strftime("%Y-%m-%d %H:%M:%S") if self.create_time else None,
+        }
+
+
+class KnowledgeGraphNode(Base):
+    __tablename__ = "knowledge_graph_node"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    knowledge_id = Column(BigInteger, nullable=False, index=True)
+    node_id = Column(String(255), nullable=False)
+    node_type = Column(String(50), nullable=False)
+    node_name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    extra_data = Column(JSON, nullable=True)
+    create_time = Column(DateTime, default=datetime.now)
+    update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def to_dict(self):
+        try:
+            extra_data = json.loads(self.extra_data) if self.extra_data else {}
+        except Exception:
+            extra_data = self.extra_data or {}
+        return {
+            "id": self.id,
+            "knowledge_id": self.knowledge_id,
+            "node_id": self.node_id,
+            "node_type": self.node_type,
+            "node_name": self.node_name,
+            "description": self.description,
+            "metadata": extra_data,
+            "create_time": self.create_time.strftime("%Y-%m-%d %H:%M:%S") if self.create_time else None,
+            "update_time": self.update_time.strftime("%Y-%m-%d %H:%M:%S") if self.update_time else None,
+        }
+
+
+class KnowledgeGraphEdge(Base):
+    __tablename__ = "knowledge_graph_edge"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    knowledge_id = Column(BigInteger, nullable=False, index=True)
+    source_node_id = Column(String(255), nullable=False)
+    target_node_id = Column(String(255), nullable=False)
+    relation_type = Column(String(50), nullable=False)
+    description = Column(Text, nullable=True)
+    extra_data = Column(JSON, nullable=True)
+    create_time = Column(DateTime, default=datetime.now)
+
+    def to_dict(self):
+        try:
+            extra_data = json.loads(self.extra_data) if self.extra_data else {}
+        except Exception:
+            extra_data = self.extra_data or {}
+        return {
+            "id": self.id,
+            "knowledge_id": self.knowledge_id,
+            "source_node_id": self.source_node_id,
+            "target_node_id": self.target_node_id,
+            "relation_type": self.relation_type,
+            "description": self.description,
+            "metadata": extra_data,
             "create_time": self.create_time.strftime("%Y-%m-%d %H:%M:%S") if self.create_time else None,
         }
 

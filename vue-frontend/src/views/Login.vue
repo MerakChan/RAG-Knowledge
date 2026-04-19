@@ -1,71 +1,76 @@
 <template>
   <div class="login-page">
-    <section class="login-brand">
-      <div class="brand-badge">AI Second Brain</div>
-      <h1>多元知识库与混合大模型智能学习平台</h1>
-      <p class="brand-copy">
-        面向毕业设计场景，统一连接文档、网页收藏、数据库笔记与 RAG 问答能力，并通过账号体系保护个人学习资产。
-      </p>
+    <div class="login-mesh"></div>
+    <div class="login-orb login-orb--violet"></div>
+    <div class="login-orb login-orb--blue"></div>
 
-      <div class="brand-grid">
-        <article v-for="item in highlights" :key="item.title" class="brand-card">
-          <span class="brand-card__value">{{ item.value }}</span>
-          <strong>{{ item.title }}</strong>
-          <p>{{ item.description }}</p>
-        </article>
-      </div>
-    </section>
+    <section class="login-card glass-card">
+      <div class="login-copy">
+        <span class="eyebrow">AI 第二大脑</span>
+        <h1>连接多源知识，把灵感沉淀成真正可用的内容。</h1>
+        <p>
+          把 PDF、笔记与 AI 对话放进同一个沉浸式空间
+        </p>
 
-    <section class="login-panel glass-card">
-      <div class="panel-top">
-        <span class="panel-tag">{{ isRegister ? 'Register' : 'Welcome Back' }}</span>
-        <h2>{{ isRegister ? '创建你的学习账号' : '登录进入系统' }}</h2>
-        <p>{{ isRegister ? '注册后即可使用 JWT 认证访问个人知识库、学习资料中心和 AI 问答功能。' : '使用账号密码登录，进入你的 AI 第二大脑系统。' }}</p>
+        <div class="highlight-grid">
+          <article v-for="item in highlights" :key="item.title" class="highlight-card">
+            <strong>{{ item.title }}</strong>
+            <p>{{ item.description }}</p>
+          </article>
+        </div>
       </div>
 
-      <div class="auth-switch">
-        <button class="auth-switch__item" :class="{ active: !isRegister }" type="button" @click="switchMode(false)">登录</button>
-        <button class="auth-switch__item" :class="{ active: isRegister }" type="button" @click="switchMode(true)">注册</button>
-      </div>
-
-      <form class="login-form" @submit.prevent="submitAuth">
-        <div v-if="isRegister" class="form-row">
-          <label class="field-label" for="nickname">昵称</label>
-          <input id="nickname" v-model="form.nickname" class="field-input" type="text" placeholder="请输入昵称" autocomplete="nickname" />
+      <div class="auth-panel">
+        <div class="panel-top">
+          <span class="panel-tag">{{ isRegister ? '创建账号' : '欢迎回来' }}</span>
+          <h2>{{ isRegister ? '创建你的第二大脑' : '进入灵感空间' }}</h2>
+          <p>{{ isRegister ? '注册后即可同步你的专属知识库、笔记和 AI 对话。' : '继续在你的个人 AI 笔记本中写作、收藏与提问。' }}</p>
         </div>
 
-        <div class="form-row">
-          <label class="field-label" for="username">用户名</label>
-          <input id="username" v-model="form.username" class="field-input" type="text" placeholder="请输入用户名" autocomplete="username" />
+        <div class="auth-switch">
+          <button class="auth-switch__item" :class="{ active: !isRegister }" type="button" @click="switchMode(false)">登录</button>
+          <button class="auth-switch__item" :class="{ active: isRegister }" type="button" @click="switchMode(true)">注册</button>
         </div>
 
-        <div class="form-row">
-          <label class="field-label" for="password">密码</label>
-          <input id="password" v-model="form.password" class="field-input" type="password" placeholder="请输入密码" autocomplete="current-password" />
-        </div>
+        <form class="login-form" @submit.prevent="submitAuth">
+          <div v-if="isRegister" class="form-row">
+            <label class="field-label" for="nickname">昵称</label>
+            <input id="nickname" v-model="form.nickname" class="field-input" type="text" placeholder="设置一个显示名称" autocomplete="nickname" />
+          </div>
 
-        <div v-if="isRegister" class="form-row">
-          <label class="field-label" for="confirm-password">确认密码</label>
-          <input id="confirm-password" v-model="form.confirmPassword" class="field-input" type="password" placeholder="请再次输入密码" autocomplete="new-password" />
-        </div>
+          <div class="form-row">
+            <label class="field-label" for="username">用户名</label>
+            <input id="username" v-model="form.username" class="field-input" type="text" placeholder="请输入用户名" autocomplete="username" />
+          </div>
 
-        <div v-if="errorMessage" class="error-banner">
-          {{ errorMessage }}
-        </div>
+          <div class="form-row">
+            <label class="field-label" for="password">密码</label>
+            <input id="password" v-model="form.password" class="field-input" type="password" placeholder="请输入密码" autocomplete="current-password" />
+          </div>
 
-        <button class="btn btn-primary submit-btn" type="submit" :disabled="loading">
-          {{ loading ? '提交中...' : isRegister ? '注册并进入系统' : '登录系统' }}
-        </button>
-      </form>
+          <div v-if="isRegister" class="form-row">
+            <label class="field-label" for="confirm-password">确认密码</label>
+            <input id="confirm-password" v-model="form.confirmPassword" class="field-input" type="password" placeholder="请再次输入密码" autocomplete="new-password" />
+          </div>
 
-      <div class="account-tip">
-        <div>
-          <span>认证方式</span>
-          <strong>JWT</strong>
-        </div>
-        <div>
-          <span>密码存储</span>
-          <strong>Hash</strong>
+          <div v-if="errorMessage" class="error-banner">
+            {{ errorMessage }}
+          </div>
+
+          <button class="btn btn-primary submit-btn" type="submit" :disabled="loading">
+            {{ loading ? '提交中...' : isRegister ? '注册并进入' : '进入系统' }}
+          </button>
+        </form>
+
+        <div class="panel-foot">
+          <div>
+            <span>产品定位</span>
+            <strong>个人 AI 笔记本</strong>
+          </div>
+          <div>
+            <span>技术闭环</span>
+            <strong>RAG + LLM</strong>
+          </div>
         </div>
       </div>
     </section>
@@ -93,19 +98,16 @@ const form = reactive({
 
 const highlights = [
   {
-    title: '多源知识接入',
-    value: 'RAG',
-    description: '支持文件、网页、快速笔记和 SQL 代码记录统一接入知识库。'
+    title: '沉浸创作',
+    description: '让知识库、笔记与 AI 辅助处在同一个视觉平面。'
   },
   {
-    title: '混合大模型配置',
-    value: 'LLM + API',
-    description: '独立支持模型与 API 配置，体现多模型接入和混合开发能力。'
+    title: '多源沉淀',
+    description: '把 PDF、网页资料与快速笔记统一收进一个学习主题。'
   },
   {
-    title: '账号安全访问',
-    value: 'JWT',
-    description: '通过注册、登录和令牌校验实现真实账号密码访问。'
+    title: '可信问答',
+    description: '用真实的 RAG 闭环替代普通的后台式展示。'
   }
 ]
 
@@ -116,7 +118,7 @@ const switchMode = (registerMode) => {
 
 const completeAuth = async (payload) => {
   setAuthSession(payload.token, payload.user)
-  await router.replace('/main')
+  await router.replace('/dashboard')
 }
 
 const submitAuth = async () => {
@@ -165,123 +167,137 @@ const submitAuth = async () => {
 
 <style scoped>
 .login-page {
-  min-height: 100vh;
-  padding: 32px;
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 460px);
-  gap: 28px;
-  align-items: stretch;
-}
-
-.login-brand,
-.login-panel {
-  border-radius: var(--radius-xl);
-}
-
-.login-brand {
   position: relative;
+  min-height: 100vh;
+  padding: 28px;
+  display: grid;
+  place-items: center;
   overflow: hidden;
-  padding: 44px;
+}
+
+.login-mesh,
+.login-orb {
+  position: absolute;
+  pointer-events: none;
+}
+
+.login-mesh {
+  inset: 0;
   background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.22), transparent 24%),
-    linear-gradient(145deg, #15337f 0%, #285ee6 48%, #46a8ff 100%);
-  color: #f7fbff;
+    radial-gradient(circle at 12% 16%, rgba(200, 215, 240, 0.45), transparent 25%),
+    radial-gradient(circle at 86% 14%, rgba(220, 210, 250, 0.4), transparent 28%),
+    radial-gradient(circle at 76% 78%, rgba(230, 245, 240, 0.3), transparent 24%),
+    radial-gradient(circle at 30% 84%, rgba(245, 235, 245, 0.35), transparent 25%);
+  animation: meshFloat 16s ease-in-out infinite alternate;
+}
+
+.login-orb {
+  width: 480px;
+  height: 480px;
+  border-radius: 50%;
+  filter: blur(56px);
+  opacity: 0.35;
+}
+
+.login-orb--violet {
+  top: -5%;
+  left: -5%;
+  background: rgba(190, 180, 240, 0.6);
+}
+
+.login-orb--blue {
+  right: -5%;
+  bottom: -5%;
+  background: rgba(170, 210, 240, 0.6);
+}
+
+.login-card {
+  position: relative;
+  z-index: 1;
+  width: min(1120px, 100%);
+  padding: 24px;
+  border-radius: var(--radius-xl);
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(360px, 430px);
+  gap: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(32px);
+  -webkit-backdrop-filter: blur(32px);
   box-shadow: var(--shadow-float);
 }
 
-.login-brand::after {
-  content: "";
-  position: absolute;
-  inset: auto -120px -120px auto;
-  width: 320px;
-  height: 320px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
+.login-copy,
+.auth-panel {
+  border-radius: 24px;
 }
 
-.brand-badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 36px;
-  padding: 0 16px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  font-size: 13px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.login-copy {
+  padding: 40px;
+  background: transparent;
+  border: none;
 }
 
-.login-brand h1 {
-  max-width: 680px;
-  margin: 26px 0 16px;
-  font-size: clamp(36px, 5vw, 58px);
-  line-height: 1.08;
+.login-copy h1 {
+  margin: 20px 0 14px;
+  font-size: clamp(34px, 5vw, 58px);
+  line-height: 1.06;
 }
 
-.brand-copy {
-  max-width: 620px;
+.login-copy p {
   margin: 0;
-  font-size: 18px;
-  line-height: 1.8;
-  color: rgba(247, 251, 255, 0.86);
+  max-width: 620px;
+  color: var(--text-secondary);
+  font-size: 17px;
+  line-height: 1.9;
 }
 
-.brand-grid {
-  position: relative;
-  z-index: 1;
+.highlight-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-  margin-top: 44px;
+  gap: 16px;
+  margin-top: 34px;
 }
 
-.brand-card {
-  padding: 22px 20px;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.11);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(10px);
+.highlight-card {
+  padding: 20px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
-.brand-card__value {
-  display: block;
-  margin-bottom: 18px;
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(247, 251, 255, 0.7);
-}
-
-.brand-card strong {
+.highlight-card strong {
   display: block;
   margin-bottom: 10px;
-  font-size: 20px;
+  font-size: 17px;
 }
 
-.brand-card p {
-  margin: 0;
+.highlight-card p {
   font-size: 14px;
-  line-height: 1.7;
-  color: rgba(247, 251, 255, 0.76);
+  line-height: 1.8;
 }
 
-.login-panel {
-  align-self: center;
-  padding: 34px;
+.auth-panel {
+  padding: 40px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: var(--shadow-card);
 }
 
 .panel-top {
-  margin-bottom: 22px;
+  margin-bottom: 20px;
 }
 
 .panel-tag {
   display: inline-flex;
-  margin-bottom: 14px;
-  padding: 7px 12px;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
   border-radius: 999px;
-  background: rgba(47, 107, 255, 0.1);
-  color: var(--primary);
+  background: rgba(123, 125, 243, 0.12);
+  color: var(--primary-strong);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -289,26 +305,25 @@ const submitAuth = async () => {
 }
 
 .panel-top h2 {
-  margin: 0 0 10px;
+  margin: 18px 0 10px;
   font-size: 30px;
-  line-height: 1.15;
 }
 
 .panel-top p {
   margin: 0;
   color: var(--text-secondary);
-  line-height: 1.7;
+  line-height: 1.75;
 }
 
 .auth-switch {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  padding: 8px;
+  gap: 8px;
+  padding: 6px;
+  margin-bottom: 20px;
   border-radius: 999px;
-  background: rgba(244, 247, 252, 0.96);
-  border: 1px solid var(--line-soft);
-  margin-bottom: 22px;
+  background: rgba(241, 243, 255, 0.88);
+  border: 1px solid rgba(130, 143, 187, 0.16);
 }
 
 .auth-switch__item {
@@ -317,89 +332,90 @@ const submitAuth = async () => {
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: .2s;
+  transition: 0.2s ease;
 }
 
 .auth-switch__item.active {
-  background: var(--bg-accent);
+  background: linear-gradient(135deg, var(--primary) 0%, #9c8cff 100%);
   color: #fff;
-  box-shadow: 0 10px 20px rgba(47, 107, 255, 0.18);
+  box-shadow: 0 14px 28px rgba(123, 125, 243, 0.22);
 }
 
 .login-form {
   display: grid;
-  gap: 18px;
-}
-
-.form-row {
-  display: grid;
+  gap: 16px;
 }
 
 .submit-btn {
   width: 100%;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .error-banner {
   padding: 14px 16px;
   border-radius: 18px;
-  background: rgba(239, 68, 68, 0.1);
-  color: var(--danger);
+  background: rgba(227, 102, 126, 0.12);
+  color: #ba4663;
   font-size: 14px;
 }
 
-.account-tip {
+.panel-foot {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
-  margin-top: 24px;
+  margin-top: 22px;
 }
 
-.account-tip div {
-  padding: 16px 18px;
+.panel-foot div {
+  padding: 16px;
   border-radius: 20px;
-  background: rgba(244, 247, 252, 0.9);
-  border: 1px solid var(--line-soft);
+  background: rgba(248, 249, 255, 0.92);
+  border: 1px solid rgba(129, 142, 186, 0.12);
 }
 
-.account-tip span {
+.panel-foot span {
   display: block;
   margin-bottom: 8px;
   color: var(--text-muted);
   font-size: 13px;
 }
 
-.account-tip strong {
-  font-size: 18px;
+.panel-foot strong {
+  font-size: 16px;
 }
 
-@media (max-width: 1080px) {
-  .login-page {
+@keyframes meshFloat {
+  from {
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+
+  to {
+    transform: scale(1.08) translate3d(0, -14px, 0);
+  }
+}
+
+@media (max-width: 980px) {
+  .login-card {
     grid-template-columns: 1fr;
   }
 
-  .brand-grid {
+  .highlight-grid {
     grid-template-columns: 1fr;
-  }
-
-  .login-panel {
-    max-width: 560px;
-    width: 100%;
-    justify-self: center;
   }
 }
 
 @media (max-width: 640px) {
   .login-page {
-    padding: 18px;
+    padding: 16px;
   }
 
-  .login-brand,
-  .login-panel {
-    padding: 24px;
+  .login-card,
+  .login-copy,
+  .auth-panel {
+    padding: 20px;
   }
 
-  .account-tip {
+  .panel-foot {
     grid-template-columns: 1fr;
   }
 }
