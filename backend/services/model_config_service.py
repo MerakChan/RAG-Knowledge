@@ -4,8 +4,18 @@ import os
 import re
 import uuid
 
-from config import Config
+from backend.config import Config
 
+
+# 模型配置服务类，主要负责管理AI模型的配置和调度
+
+# - 模型配置管理
+# - 内置DeepSeek系列模型的默认配置
+# - 支持用户自定义OpenAI兼容模型
+# - 模型参数的标准化处理（URL、模型名等） 2. 模型调度策略
+# - 固定任务分配：为不同任务类型（聊天、RAG、摘要等）指定特定模型
+# - 标签匹配策略：根据模型标签自动匹配任务类型
+# - 降级策略：主模型不可用时自动切换到备用模型
 
 class ModelConfigService:
     def __init__(self, config_path=None):

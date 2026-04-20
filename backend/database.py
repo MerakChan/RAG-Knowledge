@@ -6,16 +6,22 @@ from sqlalchemy import JSON, BigInteger, Column, DateTime, Integer, String, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-
+# 数据库连接配置
 DB_URL = os.environ.get(
     "DB_URL",
     "mysql+pymysql://root:123456@localhost:3306/rag_platform?charset=utf8mb4",
 )
 
+# 引擎和会话创建
 engine = create_engine(DB_URL, echo=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+#基于 SQLAlchemy 的数据库模型定义文件，用于构建 RAG 知识平台的核心数据结构
+# - 数据库连接配置 ：使用 MySQL 作为后端数据库，通过环境变量或默认值配置连接字符串
+# - ORM 模型定义 ：定义了 15 个核心业务表，覆盖用户、知识库、聊天、学习笔记等功能
+# - 数据访问层 ：提供 init_db() 初始化数据库和 get_db() 获取数据库会话的工具函数
+# - 数据转换 ：每个模型类都实现了 to_dict() 方法，方便将数据库对象转换为字典格式用于 API 返回
 
 class AppUser(Base):
     __tablename__ = "app_user"

@@ -208,29 +208,6 @@
             <textarea v-model="knowledgeModal.form.description" class="field-textarea" placeholder="描述这个知识空间的内容边界"></textarea>
           </div>
           <div>
-            <label class="field-label">背景设定（Persona）</label>
-            <textarea v-model="knowledgeModal.form.persona" class="field-textarea" placeholder="例如：你是一名操作系统面试官，擅长深入追问底层原理"></textarea>
-          </div>
-          <div class="modal-grid">
-            <div>
-              <label class="field-label">思考方式（Thinking Style）</label>
-              <select v-model="knowledgeModal.form.thinking_style" class="field-select">
-                <option value="teaching">教学型（逐步讲解、举例）</option>
-                <option value="interview">面试型（反问、追问、压力测试）</option>
-                <option value="summary">总结型（精炼输出、结构化）</option>
-                <option value="reasoning">推理型（多步推理、对比分析）</option>
-              </select>
-            </div>
-            <div>
-              <label class="field-label">模型策略（Model Strategy）</label>
-              <input v-model="knowledgeModal.form.model_strategy" class="field-input" type="text" placeholder="例如：使用 gpt-4 进行推理，使用 gpt-3.5 进行总结" />
-            </div>
-          </div>
-          <div>
-            <label class="field-label">任务策略（Task Policy）</label>
-            <input v-model="knowledgeModal.form.task_policy" class="field-input" type="text" placeholder="例如：知识查缺、问题生成（用逗号分隔）" />
-          </div>
-          <div>
             <label class="field-label">标签（Tags）</label>
             <input v-model="knowledgeModal.form.tags" class="field-input" type="text" placeholder="例如：计算机科学, 机器学习（用逗号分隔）" />
           </div>

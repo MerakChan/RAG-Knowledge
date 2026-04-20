@@ -4,10 +4,10 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from config import Config
-from database import ChatMessage, KnowledgeDatasource, KnowledgeTableSchema, SessionLocal
-from services.model_config_service import ModelConfigService
-from services.vector_service import VectorService
+from backend.config import Config
+from backend.database import ChatMessage, KnowledgeDatasource, KnowledgeTableSchema, SessionLocal
+from backend.services.model_config_service import ModelConfigService
+from backend.services.vector_service import VectorService
 
 
 class RAGService:
@@ -512,7 +512,7 @@ SQL："""
         多文档向量检索：对每个文档单独检索最相关的片段
         返回：按文档分组的检索结果
         """
-        from database import SessionLocal, KnowledgeItem
+        from backend.database import SessionLocal, KnowledgeItem
         
         db = SessionLocal()
         try:
@@ -881,7 +881,7 @@ SQL："""
         """
         构建知识图谱并保存到数据库
         """
-        from database import SessionLocal, KnowledgeGraphNode, KnowledgeGraphEdge
+        from backend.database import SessionLocal, KnowledgeGraphNode, KnowledgeGraphEdge
         db = SessionLocal()
         
         try:
@@ -958,7 +958,7 @@ SQL："""
         """
         以知识源为节点的知识图谱构建流程
         """
-        from database import SessionLocal, KnowledgeItem, KnowledgeChunk
+        from backend.database import SessionLocal, KnowledgeItem, KnowledgeChunk
         import json
         
         db = SessionLocal()
@@ -1089,7 +1089,7 @@ SQL："""
         """
         构建以知识源为节点的图谱
         """
-        from database import SessionLocal, KnowledgeGraphNode, KnowledgeGraphEdge
+        from backend.database import SessionLocal, KnowledgeGraphNode, KnowledgeGraphEdge
         import json
         
         db = SessionLocal()
@@ -1189,7 +1189,7 @@ SQL："""
         """
         获取已构建的知识图谱
         """
-        from database import SessionLocal, KnowledgeGraphNode, KnowledgeGraphEdge
+        from backend.database import SessionLocal, KnowledgeGraphNode, KnowledgeGraphEdge
         
         db = SessionLocal()
         try:
@@ -1213,7 +1213,7 @@ SQL："""
         """
         构建知识溯源的上下文，为每个chunk添加来源标签
         """
-        from database import SessionLocal, KnowledgeItem
+        from backend.database import SessionLocal, KnowledgeItem
         
         db = SessionLocal()
         context_parts = []

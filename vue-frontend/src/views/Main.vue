@@ -249,9 +249,9 @@
             <div class="panel-card__header">
               <!-- 已删除重复的顶部内容 -->
             </div>
-            <div style="display: flex; height: calc(100vh - 40px); overflow-y: hidden; position: relative;">
+            <div style="display: flex; position: relative;">
               <!-- 右侧内容区域 -->
-              <div style="flex: 1; padding: 18px; overflow-y: auto;">
+              <div style="flex: 1; padding: 18px;">
                 <!-- 多文档联合分析 -->
                 <div v-if="agentActiveTab === 'multiDoc'">
                   <div style="margin-bottom: 20px;">
@@ -916,7 +916,6 @@
         <template v-if="messages.length">
           <article v-for="message in messages" :key="message.id" class="message-card" :class="message.role">
             <div class="message-card__meta">
-              <strong>{{ message.role === 'user' ? '你' : '助手' }}</strong>
             </div>
             <div class="message-card__body markdown-body" v-html="renderMessage(message.content, message.role)"></div>
           </article>
@@ -2843,6 +2842,10 @@ const sendMessage = async () => {
     }
 
     while (true) {
+      if (isPaused.value) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        continue
+      }
       const { done, value } = await reader.read()
       if (done) break
       answer += decoder.decode(value, { stream: true })
