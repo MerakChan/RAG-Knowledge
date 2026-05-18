@@ -33,6 +33,7 @@ class AppUser(Base):
     status = Column(String(20), default="active")
     create_time = Column(DateTime, default=datetime.now)
     update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    type = Column(Integer, default=1)  # 0: 超级管理员, 1: 普通用户
 
     def to_dict(self):
         return {
@@ -40,6 +41,7 @@ class AppUser(Base):
             "username": self.username,
             "nickname": self.nickname or self.username,
             "status": self.status,
+            "type": self.type,
             "create_time": self.create_time.strftime("%Y-%m-%d %H:%M:%S") if self.create_time else None,
             "update_time": self.update_time.strftime("%Y-%m-%d %H:%M:%S") if self.update_time else None,
         }
@@ -403,14 +405,87 @@ class KnowledgeGraphEdge(Base):
         except Exception:
             extra_data = self.extra_data or {}
         return {
-            "id": self.id,
-            "knowledge_id": self.knowledge_id,
-            "source_node_id": self.source_node_id,
-            "target_node_id": self.target_node_id,
-            "relation_type": self.relation_type,
-            "description": self.description,
-            "metadata": extra_data,
-            "create_time": self.create_time.strftime("%Y-%m-%d %H:%M:%S") if self.create_time else None,
+            'id': self.id,
+            'knowledge_id': self.knowledge_id,
+            'source_node_id': self.source_node_id,
+            'target_node_id': self.target_node_id,
+            'relation_type': self.relation_type,
+            'description': self.description,
+            'metadata': extra_data,
+            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None,
+        }
+
+
+class ModelConfig(Base):
+    __tablename__ = 'model_config'
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    model_name = Column(String(100), nullable=False)
+    model_type = Column(String(50), nullable=False)
+    api_base = Column(String(500), nullable=False)
+    api_key = Column(String(500), nullable=False)
+    api_version = Column(String(50), nullable=True)
+    model_id = Column(String(200), nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+    is_active = Column(Integer, default=1)
+    is_default = Column(Integer, default=0)
+    priority = Column(Integer, default=0)
+    max_tokens = Column(Integer, nullable=True)
+    temperature = Column(Integer, nullable=True)
+    top_p = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_by = Column(BigInteger, nullable=True)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'model_name': self.model_name,
+            'model_type': self.model_type,
+            'api_base': self.api_base,
+            'api_key': self.api_key[:6] + '...' if self.api_key and len(self.api_key) > 10 else self.api_key,
+            'api_version': self.api_version,
+            'model_id': self.model_id,
+            'description': self.description,
+            'is_active': bool(self.is_active),
+            'is_default': bool(self.is_default),
+            'priority': self.priority,
+            'max_tokens': self.max_tokens,
+            'temperature': self.temperature,
+            'top_p': self.top_p,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
+            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else None,
+        }
+
+
+class ErrorLog(Base):
+    __tablename__ = 'error_log'
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    error_level = Column(String(20), nullable=False)
+    error_type = Column(String(100), nullable=True)
+    error_message = Column(Text, nullable=False)
+    stack_trace = Column(Text, nullable=True)
+    request_path = Column(String(500), nullable=True)
+    request_method = Column(String(10), nullable=True)
+    user_id = Column(BigInteger, nullable=True)
+    ip_address = Column(String(50), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'error_level': self.error_level,
+            'error_type': self.error_type,
+            'error_message': self.error_message,
+            'stack_trace': self.stack_trace,
+            'request_path': self.request_path,
+            'request_method': self.request_method,
+            'user_id': self.user_id,
+            'ip_address': self.ip_address,
+            'user_agent': self.user_agent,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
         }
 
 

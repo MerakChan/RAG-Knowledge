@@ -62,6 +62,12 @@
           </button>
         </form>
 
+        <div class="admin-login-wrapper">
+          <button class="btn-admin-login" type="button" @click="adminLogin" :disabled="loading">
+            超级管理员登录
+          </button>
+        </div>
+
         <div class="panel-foot">
           <div>
             <span>产品定位</span>
@@ -116,9 +122,13 @@ const switchMode = (registerMode) => {
   errorMessage.value = ''
 }
 
-const completeAuth = async (payload) => {
+const completeAuth = async (payload, isAdmin = false) => {
   setAuthSession(payload.token, payload.user)
-  await router.replace('/dashboard')
+  if (isAdmin) {
+    await router.replace('/admin')
+  } else {
+    await router.replace('/dashboard')
+  }
 }
 
 const submitAuth = async () => {
@@ -159,6 +169,28 @@ const submitAuth = async () => {
     await completeAuth(data)
   } catch (error) {
     errorMessage.value = error?.response?.data?.error || '认证失败，请稍后重试'
+  } finally {
+    loading.value = false
+  }
+}
+
+const adminLogin = async () => {
+  errorMessage.value = ''
+
+  if (!form.username.trim() || !form.password.trim()) {
+    errorMessage.value = '请输入用户名和密码'
+    return
+  }
+
+  loading.value = true
+  try {
+    const { data } = await axios.post('/api/auth/admin-login', {
+      username: form.username.trim(),
+      password: form.password
+    })
+    await completeAuth(data, true)
+  } catch (error) {
+    errorMessage.value = error?.response?.data?.error || '超级管理员认证失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -349,6 +381,32 @@ const submitAuth = async () => {
 .submit-btn {
   width: 100%;
   margin-top: 4px;
+}
+
+.admin-login-wrapper {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.btn-admin-login {
+  padding: 6px 14px;
+  font-size: 12px;
+  border: none;
+  border-radius: 8px;
+  background-color: #dc2626;
+  color: white;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.btn-admin-login:hover:not(:disabled) {
+  opacity: 0.8;
+}
+
+.btn-admin-login:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .error-banner {

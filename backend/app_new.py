@@ -17,7 +17,7 @@ from datetime import datetime, date, timedelta
 from html.parser import HTMLParser
 from urllib.parse import urlparse
 from PIL import Image, ImageFilter
-from database import SessionLocal, AppUser, KnowledgeBase, KnowledgeData, KnowledgeChunk, KnowledgeItem, KnowledgeDocument, KnowledgeDatasource, KnowledgeTableSchema, LearningQuickNote, LearningWebBookmark, LearningDatabaseNote, ChatSession, ChatMessage, init_db
+from database import SessionLocal, AppUser, KnowledgeBase, KnowledgeData, KnowledgeChunk, KnowledgeItem, KnowledgeDocument, KnowledgeDatasource, KnowledgeTableSchema, LearningQuickNote, LearningWebBookmark, LearningDatabaseNote, ChatSession, ChatMessage, ErrorLog, init_db
 
 from services.document_service import DocumentService
 from services.sql_service import SQLService
@@ -37,6 +37,70 @@ CORS(app)
 # 数据库会话依赖
 def get_db_session():
     return SessionLocal()
+
+
+# 错误日志记录函数
+def log_error(error_level, error_type, error_message, stack_trace=None):
+    try:
+        db = get_db_session()
+        user_id = None
+        try:
+            if hasattr(request, 'current_user') and request.current_user:
+                user_id = request.current_user.id
+        except:
+            pass
+        
+        request_path = None
+        request_method = None
+        ip_address = None
+        user_agent = None
+        
+        try:
+            request_path = request.path
+            request_method = request.method
+            ip_address = request.remote_addr
+            user_agent = request.headers.get('User-Agent', '')
+        except:
+            pass
+        
+        error_log = ErrorLog(
+            error_level=error_level,
+            error_type=error_type,
+            error_message=error_message,
+            stack_trace=stack_trace,
+            request_path=request_path,
+            request_method=request_method,
+            user_id=user_id,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+        db.add(error_log)
+        db.commit()
+    except Exception as log_error:
+        print(f"日志记录失败: {str(log_error)}")
+    finally:
+        try:
+            db.close()
+        except:
+            pass
+
+
+# 全局错误处理器
+@app.errorhandler(Exception)
+def handle_exception(error):
+    import traceback
+    stack_trace = traceback.format_exc()
+    
+    # 记录错误
+    log_error(
+        error_level='ERROR',
+        error_type=type(error).__name__,
+        error_message=str(error),
+        stack_trace=stack_trace
+    )
+    
+    # 返回错误响应
+    return jsonify({'error': str(error)}), 500
 
 # 配置
 DATA_FOLDER = os.path.join(os.path.dirname(__file__), '..', 'data')
@@ -68,6 +132,7 @@ JWT_EXPIRE_SECONDS = 7 * 24 * 60 * 60
 PUBLIC_API_PATHS = {
     '/api/auth/login',
     '/api/auth/register',
+    '/api/auth/admin-login',
 }
 PUBLIC_API_PREFIXES = (
     '/api/media/covers/',
@@ -426,22 +491,93 @@ def claim_orphan_records(db, user_id):
 
 def ensure_user_auth_schema(db):
     table_exists = db.execute(text("SHOW TABLES LIKE 'app_user'")).fetchone()
-    if table_exists:
-        return
+    if not table_exists:
+        db.execute(text("""
+            CREATE TABLE app_user (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '用户ID',
+                username VARCHAR(64) NOT NULL UNIQUE COMMENT '登录用户名',
+                password_hash VARCHAR(255) NOT NULL COMMENT '密码哈希',
+                nickname VARCHAR(100) NULL COMMENT '昵称',
+                status VARCHAR(20) NOT NULL DEFAULT 'active' COMMENT 'active/inactive',
+                create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                type TINYINT NOT NULL DEFAULT 1 COMMENT '用户类型：0-超级管理员，1-普通用户',
+                INDEX idx_app_user_status (status)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统用户表'
+        """))
+        db.commit()
+    else:
+        # 检查是否存在 type 字段，不存在则添加
+        columns = [col[0] for col in db.execute(text("SHOW COLUMNS FROM app_user")).fetchall()]
+        if 'type' not in columns:
+            db.execute(text("ALTER TABLE app_user ADD COLUMN type TINYINT NOT NULL DEFAULT 1 COMMENT '用户类型：0-超级管理员，1-普通用户' AFTER update_time"))
+            db.commit()
+    
+    # 确保 model_config 表存在
+    model_table_exists = db.execute(text("SHOW TABLES LIKE 'model_config'")).fetchone()
+    if not model_table_exists:
+        db.execute(text("""
+            CREATE TABLE model_config (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+                model_name VARCHAR(100) NOT NULL COMMENT '模型名称',
+                model_type VARCHAR(50) NOT NULL COMMENT '模型类型：llm/embedding/both',
+                api_base VARCHAR(500) NOT NULL COMMENT 'API基础地址',
+                api_key VARCHAR(500) NOT NULL COMMENT 'API密钥',
+                api_version VARCHAR(50) NULL COMMENT 'API版本',
+                model_id VARCHAR(200) NOT NULL UNIQUE COMMENT '模型ID/标识',
+                description TEXT NULL COMMENT '模型描述',
+                is_active TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
+                is_default TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否默认',
+                priority INT NOT NULL DEFAULT 0 COMMENT '优先级',
+                max_tokens INT NULL COMMENT '最大token数',
+                temperature FLOAT NULL COMMENT '默认温度',
+                top_p FLOAT NULL COMMENT '默认top_p',
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                created_by BIGINT NULL COMMENT '创建者用户ID',
+                INDEX idx_model_type (model_type),
+                INDEX idx_is_active (is_active)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='模型配置表'
+        """))
+        db.commit()
+    
+    # 确保 error_log 表存在
+    error_log_table_exists = db.execute(text("SHOW TABLES LIKE 'error_log'")).fetchone()
+    if not error_log_table_exists:
+        db.execute(text("""
+            CREATE TABLE error_log (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+                error_level VARCHAR(20) NOT NULL COMMENT '错误级别：ERROR/WARNING/CRITICAL',
+                error_type VARCHAR(100) COMMENT '错误类型',
+                error_message TEXT NOT NULL COMMENT '错误消息',
+                stack_trace TEXT COMMENT '堆栈跟踪',
+                request_path VARCHAR(500) COMMENT '请求路径',
+                request_method VARCHAR(10) COMMENT '请求方法',
+                user_id BIGINT COMMENT '用户ID',
+                ip_address VARCHAR(50) COMMENT 'IP地址',
+                user_agent VARCHAR(500) COMMENT '用户代理',
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                INDEX idx_error_level (error_level),
+                INDEX idx_created_at (created_at),
+                INDEX idx_user_id (user_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='错误日志表'
+        """))
+        db.commit()
 
-    db.execute(text("""
-        CREATE TABLE app_user (
-            id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '用户ID',
-            username VARCHAR(64) NOT NULL UNIQUE COMMENT '登录用户名',
-            password_hash VARCHAR(255) NOT NULL COMMENT '密码哈希',
-            nickname VARCHAR(100) NULL COMMENT '昵称',
-            status VARCHAR(20) NOT NULL DEFAULT 'active' COMMENT 'active/inactive',
-            create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-            update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-            INDEX idx_app_user_status (status)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统用户表'
-    """))
-    db.commit()
+
+def init_default_admin(db):
+    """初始化默认超级管理员账号"""
+    admin = db.query(AppUser).filter(AppUser.username == 'admin').first()
+    if not admin:
+        admin = AppUser(
+            username='admin',
+            password_hash=generate_password_hash('123456'),
+            nickname='超级管理员',
+            status='active',
+            type=0
+        )
+        db.add(admin)
+        db.commit()
 
 
 @app.route('/api/auth/register', methods=['POST'])
@@ -502,6 +638,38 @@ def login_user():
 
         return jsonify({
             'message': '登录成功',
+            'token': issue_user_token(user),
+            'user': user.to_dict()
+        })
+    finally:
+        db.close()
+
+
+@app.route('/api/auth/admin-login', methods=['POST'])
+def admin_login():
+    """超级管理员登录接口"""
+    data = request.get_json() or {}
+    username = str(data.get('username', '')).strip()
+    password = str(data.get('password', '')).strip()
+
+    if not username or not password:
+        return jsonify({'error': '请输入用户名和密码'}), 400
+
+    db = get_db_session()
+    try:
+        ensure_user_auth_schema(db)
+        init_default_admin(db)
+        
+        user = db.query(AppUser).filter(AppUser.username == username).first()
+        if not user or not check_password_hash(user.password_hash, password):
+            return jsonify({'error': '用户名或密码错误'}), 401
+        if user.status != 'active':
+            return jsonify({'error': '账号已被禁用'}), 403
+        if user.type != 0:
+            return jsonify({'error': '该账号不是超级管理员账号'}), 403
+
+        return jsonify({
+            'message': '超级管理员登录成功',
             'token': issue_user_token(user),
             'user': user.to_dict()
         })
@@ -2838,6 +3006,412 @@ def multi_doc_analysis():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# 超级管理员 - 获取用户列表（包含对话次数统计）
+@app.route('/api/admin/users', methods=['GET'])
+def admin_get_users():
+    db = get_db_session()
+    try:
+        from sqlalchemy import func
+        
+        # 查询所有用户
+        users = db.query(AppUser).all()
+        
+        # 统计每个用户的对话次数（通过ChatSession统计）
+        user_chat_counts = {}
+        try:
+            from database import ChatSession
+            # 由于ChatSession可能没有user_id字段，我们先查询所有ChatSession数量
+            # 暂时使用模拟数据
+            for user in users:
+                user_chat_counts[user.id] = 0
+        except:
+            pass
+        
+        # 返回用户列表
+        user_list = []
+        for user in users:
+            user_dict = user.to_dict()
+            user_dict['chat_count'] = user_chat_counts.get(user.id, 0)
+            user_list.append(user_dict)
+        
+        return jsonify({'users': user_list})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+# 超级管理员 - 更新用户状态（冻结/解冻）
+@app.route('/api/admin/users/<int:user_id>/status', methods=['PATCH'])
+def admin_update_user_status(user_id):
+    db = get_db_session()
+    try:
+        data = request.get_json() or {}
+        new_status = data.get('status')
+        
+        if new_status not in ['active', 'inactive']:
+            return jsonify({'error': '无效的状态值'}), 400
+        
+        user = db.query(AppUser).filter(AppUser.id == user_id).first()
+        if not user:
+            return jsonify({'error': '用户不存在'}), 404
+        
+        user.status = new_status
+        db.commit()
+        
+        return jsonify({'success': True, 'message': '用户状态更新成功'})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+# 超级管理员 - 更新用户信息
+@app.route('/api/admin/users/<int:user_id>', methods=['PATCH'])
+def admin_update_user(user_id):
+    db = get_db_session()
+    try:
+        data = request.get_json() or {}
+        
+        user = db.query(AppUser).filter(AppUser.id == user_id).first()
+        if not user:
+            return jsonify({'error': '用户不存在'}), 404
+        
+        # 更新用户名
+        if 'username' in data and data['username']:
+            existing_user = db.query(AppUser).filter(
+                AppUser.username == data['username'],
+                AppUser.id != user_id
+            ).first()
+            if existing_user:
+                return jsonify({'error': '用户名已存在'}), 400
+            user.username = data['username']
+        
+        # 更新昵称
+        if 'nickname' in data:
+            user.nickname = data['nickname']
+        
+        # 更新密码
+        if 'password' in data and data['password']:
+            user.password_hash = generate_password_hash(data['password'])
+        
+        db.commit()
+        
+        return jsonify({'success': True, 'message': '用户信息更新成功'})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+# 超级管理员 - 获取模型配置列表
+@app.route('/api/admin/models', methods=['GET'])
+def admin_get_models():
+    db = get_db_session()
+    try:
+        from database import ModelConfig
+        
+        models = db.query(ModelConfig).order_by(ModelConfig.priority, ModelConfig.id).all()
+        
+        return jsonify({
+            'models': [model.to_dict() for model in models]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+# 超级管理员 - 创建模型配置
+@app.route('/api/admin/models', methods=['POST'])
+def admin_create_model():
+    db = get_db_session()
+    try:
+        from database import ModelConfig
+        
+        data = request.get_json() or {}
+        
+        # 验证必需字段
+        required_fields = ['model_name', 'model_type', 'api_base', 'api_key', 'model_id']
+        for field in required_fields:
+            if field not in data or not data[field]:
+                return jsonify({'error': f'字段 {field} 是必需的'}), 400
+        
+        # 检查 model_id 是否已存在
+        existing_model = db.query(ModelConfig).filter(
+            ModelConfig.model_id == data['model_id']
+        ).first()
+        if existing_model:
+            return jsonify({'error': '模型ID已存在'}), 400
+        
+        # 如果是默认模型，取消其他模型的默认状态
+        if data.get('is_default'):
+            db.query(ModelConfig).update({'is_default': 0})
+        
+        # 创建新模型配置
+        model = ModelConfig(
+            model_name=data['model_name'],
+            model_type=data['model_type'],
+            api_base=data['api_base'],
+            api_key=data['api_key'],
+            api_version=data.get('api_version'),
+            model_id=data['model_id'],
+            description=data.get('description'),
+            is_active=data.get('is_active', True),
+            is_default=data.get('is_default', False),
+            priority=data.get('priority', 0),
+            max_tokens=data.get('max_tokens'),
+            temperature=data.get('temperature'),
+            top_p=data.get('top_p')
+        )
+        
+        db.add(model)
+        db.commit()
+        db.refresh(model)
+        
+        return jsonify({
+            'success': True,
+            'message': '模型配置创建成功',
+            'model': model.to_dict()
+        })
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+# 超级管理员 - 更新模型配置
+@app.route('/api/admin/models/<int:model_id>', methods=['PATCH'])
+def admin_update_model(model_id):
+    db = get_db_session()
+    try:
+        from database import ModelConfig
+        
+        data = request.get_json() or {}
+        
+        model = db.query(ModelConfig).filter(ModelConfig.id == model_id).first()
+        if not model:
+            return jsonify({'error': '模型配置不存在'}), 404
+        
+        # 更新字段
+        if 'model_name' in data:
+            model.model_name = data['model_name']
+        if 'model_type' in data:
+            model.model_type = data['model_type']
+        if 'api_base' in data:
+            model.api_base = data['api_base']
+        if 'api_key' in data:
+            model.api_key = data['api_key']
+        if 'api_version' in data:
+            model.api_version = data['api_version']
+        if 'model_id' in data:
+            # 检查 model_id 冲突
+            if data['model_id'] != model.model_id:
+                existing = db.query(ModelConfig).filter(
+                    ModelConfig.model_id == data['model_id'],
+                    ModelConfig.id != model_id
+                ).first()
+                if existing:
+                    return jsonify({'error': '模型ID已存在'}), 400
+            model.model_id = data['model_id']
+        if 'description' in data:
+            model.description = data['description']
+        if 'is_active' in data:
+            model.is_active = data['is_active']
+        if 'priority' in data:
+            model.priority = data['priority']
+        if 'max_tokens' in data:
+            model.max_tokens = data['max_tokens']
+        if 'temperature' in data:
+            model.temperature = data['temperature']
+        if 'top_p' in data:
+            model.top_p = data['top_p']
+        
+        # 如果设置为默认模型，取消其他模型的默认状态
+        if 'is_default' in data and data['is_default']:
+            db.query(ModelConfig).filter(ModelConfig.id != model_id).update({'is_default': 0})
+            model.is_default = True
+        elif 'is_default' in data:
+            model.is_default = data['is_default']
+        
+        db.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': '模型配置更新成功',
+            'model': model.to_dict()
+        })
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+# 超级管理员 - 删除模型配置
+@app.route('/api/admin/models/<int:model_id>', methods=['DELETE'])
+def admin_delete_model(model_id):
+    db = get_db_session()
+    try:
+        from database import ModelConfig
+        
+        model = db.query(ModelConfig).filter(ModelConfig.id == model_id).first()
+        if not model:
+            return jsonify({'error': '模型配置不存在'}), 404
+        
+        db.delete(model)
+        db.commit()
+        
+        return jsonify({'success': True, 'message': '模型配置删除成功'})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+# 超级管理员 - 设置默认模型
+@app.route('/api/admin/models/<int:model_id>/default', methods=['POST'])
+def admin_set_default_model(model_id):
+    db = get_db_session()
+    try:
+        from database import ModelConfig
+        
+        model = db.query(ModelConfig).filter(ModelConfig.id == model_id).first()
+        if not model:
+            return jsonify({'error': '模型配置不存在'}), 404
+        
+        # 取消所有其他模型的默认状态
+        db.query(ModelConfig).update({'is_default': 0})
+        
+        # 设置当前模型为默认
+        model.is_default = True
+        db.commit()
+        
+        return jsonify({'success': True, 'message': '默认模型设置成功'})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+# 超级管理员 - 获取错误日志列表
+@app.route('/api/admin/error-logs', methods=['GET'])
+def admin_get_error_logs():
+    db = get_db_session()
+    try:
+        # 获取查询参数
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 20))
+        error_level = request.args.get('error_level')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        
+        # 构建查询
+        query = db.query(ErrorLog)
+        
+        # 筛选条件
+        if error_level:
+            query = query.filter(ErrorLog.error_level == error_level)
+        
+        if start_date:
+            try:
+                start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
+                query = query.filter(ErrorLog.created_at >= start_datetime)
+            except:
+                pass
+        
+        if end_date:
+            try:
+                end_datetime = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+                query = query.filter(ErrorLog.created_at < end_datetime)
+            except:
+                pass
+        
+        # 排序
+        query = query.order_by(ErrorLog.created_at.desc())
+        
+        # 统计总数
+        total = query.count()
+        
+        # 分页
+        offset = (page - 1) * page_size
+        logs = query.offset(offset).limit(page_size).all()
+        
+        return jsonify({
+            'logs': [log.to_dict() for log in logs],
+            'total': total,
+            'page': page,
+            'page_size': page_size
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+# 超级管理员 - 获取单个错误日志详情
+@app.route('/api/admin/error-logs/<int:log_id>', methods=['GET'])
+def admin_get_error_log(log_id):
+    db = get_db_session()
+    try:
+        log = db.query(ErrorLog).filter(ErrorLog.id == log_id).first()
+        if not log:
+            return jsonify({'error': '日志不存在'}), 404
+        
+        return jsonify(log.to_dict())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+# 超级管理员 - 删除错误日志
+@app.route('/api/admin/error-logs/<int:log_id>', methods=['DELETE'])
+def admin_delete_error_log(log_id):
+    db = get_db_session()
+    try:
+        log = db.query(ErrorLog).filter(ErrorLog.id == log_id).first()
+        if not log:
+            return jsonify({'error': '日志不存在'}), 404
+        
+        db.delete(log)
+        db.commit()
+        
+        return jsonify({'success': True, 'message': '日志删除成功'})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
+# 超级管理员 - 批量删除错误日志
+@app.route('/api/admin/error-logs/batch', methods=['DELETE'])
+def admin_batch_delete_error_logs():
+    db = get_db_session()
+    try:
+        data = request.get_json() or {}
+        log_ids = data.get('log_ids', [])
+        
+        if not log_ids:
+            return jsonify({'error': '请选择要删除的日志'}), 400
+        
+        db.query(ErrorLog).filter(ErrorLog.id.in_(log_ids)).delete(synchronize_session=False)
+        db.commit()
+        
+        return jsonify({'success': True, 'message': f'成功删除 {len(log_ids)} 条日志'})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
+
+
 # 知识图谱构建接口
 @app.route('/api/agent/build-knowledge-graph', methods=['POST'])
 def build_knowledge_graph():
@@ -2931,6 +3505,21 @@ def knowledge_trace():
         return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# 初始化默认超级管理员账号
+def init_app():
+    with app.app_context():
+        db = get_db_session()
+        try:
+            ensure_user_auth_schema(db)
+            init_default_admin(db)
+        finally:
+            db.close()
+
+
+# 立即初始化（当模块被导入时）
+init_app()
 
 
 if __name__ == "__main__":
